@@ -81,42 +81,6 @@ window.api = api;`;
 
 result = result.substring(0, startIdx) + newApi + result.substring(endIdx + oldEnd.length);
 
-// ── Replace remaining google.script.run.handleApiCall() calls with fetch ──
-// These are used by showRegisterForm (getDepartmentsPublic) and submitPublicRegister
-// Pattern: replace the whole Promise block that calls google.script.run.handleApiCall(action, params)
-
-const gasRunHelper = `
-/* Vercel: helper replacing google.script.run.handleApiCall */
-function _gasApiFetch(action, params) {
-  return fetch('${gasUrl}', {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(Object.assign({ action: action }, params || {}))
-  }).then(function(r) { return r.text(); }).then(function(t) {
-    var res = JSON.parse(t);
-    if (res && res.success) return res;
-    throw new Error((res && res.error) || 'Server error');
-  });
-}
-`;
-
-// Insert helper just before </script> of the first script block that has window.api
-const insertBefore = result.lastIndexOf('</script>');
-result = result.substring(0, insertBefore) + gasRunHelper + result.substring(insertBefore);
-
-// Replace the getDepartmentsPublic block in showRegisterForm
-// (the Promise that calls google.script.run.handleApiCall('getDepartmentsPublic', {}))
-result = result.replace(
-  /await new Promise\(function\(resolve, reject\) \{\s*google\.script\.run\s*\.withSuccessHandler\(function\(res\) \{ resolve\(\(res && res\.success\) \? \(res\.data \|\| \[\]\) : \[\]\); \}\)\s*\.withFailureHandler\(function\(\) \{ resolve\(\[\]\); \}\)\s*\.handleApiCall\('getDepartmentsPublic', \{\}\);\s*\}\)/g,
-  `await _gasApiFetch('getDepartmentsPublic', {}).then(function(r){ return r.data || []; }).catch(function(){ return []; })`
-);
-
-// Replace submitPublicRegister's google.script.run block
-result = result.replace(
-  /await new Promise\(function\(resolve, reject\) \{\s*google\.script\.run\s*\.withSuccessHandler\(function\(res\) \{\s*if \(res && res\.success\) resolve\(res\.data\);\s*else reject\(new Error\(\(res && res\.error\) \|\| '[^']*'\)\);\s*\}\)\s*\.withFailureHandler\(function\(err\) \{ reject\(new Error\(err\.message \|\| '[^']*'\)\); \}\)\s*\.handleApiCall\('registerStaffPublic', \{ data: data \}\);\s*\}\)/g,
-  `await _gasApiFetch('registerStaffPublic', { data: data })`
-);
-
 // Replace version string
 result = result.replace(/Nursing Service Organization v[\d.]+/g, 'Nursing Service Organization v' + versionStr);
 
@@ -129,5 +93,5 @@ const remaining = (result.match(/google\.script\.run/g) || []).length;
 if (remaining > 0) {
   console.warn('WARNING: ' + remaining + ' google.script.run reference(s) still remain in output!');
 } else {
-  console.log('✓ No google.script.run references remain.');
+  console.log('✓ All API calls are routed through fetch for Vercel. No google.script.run found.');
 }

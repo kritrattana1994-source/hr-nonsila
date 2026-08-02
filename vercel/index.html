@@ -1707,7 +1707,7 @@ tbody tr:last-child { border-bottom:none }
         <i class="fas fa-user-plus" style="color:#2563eb"></i> ลงทะเบียนพนักงานใหม่
       </button>
     </form>
-    <p class="login-ver">Nursing Service Organization v2569.08.03.0634</p>
+    <p class="login-ver">Nursing Service Organization v2569.08.03.0640</p>
   </div>
   
   <div id="registerCard" class="login-card glass hidden" style="width:100%; max-width:700px; margin: 2rem auto; max-height:85vh; overflow-y:auto; text-align:left;">
@@ -5099,7 +5099,7 @@ window.showRegisterForm = async function() {
   // Load departments from database (public - no token needed)
   var depts = [];
   try {
-    depts = await _gasApiFetch('getDepartmentsPublic', {}).then(function(r){ return r.data || []; }).catch(function(){ return []; });
+    depts = await (typeof api === 'function' ? api('getDepartmentsPublic') : window.api('getDepartmentsPublic'));
   } catch(e) {
     console.error('Failed to load departments:', e);
   }
@@ -5190,15 +5190,10 @@ window.submitPublicRegister = async function(e) {
   var fd = new FormData(form);
   var data = {};
   fd.forEach(function(v, k) { data[k] = v; });
-  
-  // Build data object matching registerStaffPublic expected fields
-  var group = data.group || 'พยาบาล';
-  if (group === 'พยาบาล' || group === 'AEMT') {
-    // licenseNo and licenseExpiry already in data from form fields
-  }
 
   try {
-    await _gasApiFetch('registerStaffPublic', { data: data });
+    const apiFn = typeof api === 'function' ? api : window.api;
+    await apiFn('registerStaffPublic', { data: data });
     if (typeof showToast === 'function') showToast('ลงทะเบียนสำเร็จ! เข้าสู่ระบบด้วยเลขบัตรประชาชน รหัสผ่านคือเบอร์โทรศัพท์', 'success');
     window.closeRegisterForm();
   } catch(err) {
@@ -5247,19 +5242,6 @@ window.handleLogout = function() {
   if (typeof showToast === 'function') showToast('ออกจากระบบแล้ว', 'info');
 };
 
-
-/* Vercel: helper replacing google.script.run.handleApiCall */
-function _gasApiFetch(action, params) {
-  return fetch('https://script.google.com/macros/s/AKfycbzVb68jA2o8DpzvuQ8cFbSkPr3PCzXWt0KxplKP2D--R8LG6g2QmtDWW2xLX2xngUSc/exec', {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(Object.assign({ action: action }, params || {}))
-  }).then(function(r) { return r.text(); }).then(function(t) {
-    var res = JSON.parse(t);
-    if (res && res.success) return res;
-    throw new Error((res && res.error) || 'Server error');
-  });
-}
 </script>
 </body>
 </html>

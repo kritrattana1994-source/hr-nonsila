@@ -2290,12 +2290,7 @@ window.showRegisterForm = async function() {
   // Load departments from database (public - no token needed)
   var depts = [];
   try {
-    depts = await new Promise(function(resolve, reject) {
-      google.script.run
-        .withSuccessHandler(function(res) { resolve((res && res.success) ? (res.data || []) : []); })
-        .withFailureHandler(function() { resolve([]); })
-        .handleApiCall('getDepartmentsPublic', {});
-    });
+    depts = await (typeof api === 'function' ? api('getDepartmentsPublic') : window.api('getDepartmentsPublic'));
   } catch(e) {
     console.error('Failed to load departments:', e);
   }
@@ -2386,23 +2381,10 @@ window.submitPublicRegister = async function(e) {
   var fd = new FormData(form);
   var data = {};
   fd.forEach(function(v, k) { data[k] = v; });
-  
-  // Build data object matching registerStaffPublic expected fields
-  var group = data.group || 'พยาบาล';
-  if (group === 'พยาบาล' || group === 'AEMT') {
-    // licenseNo and licenseExpiry already in data from form fields
-  }
 
   try {
-    await new Promise(function(resolve, reject) {
-      google.script.run
-        .withSuccessHandler(function(res) {
-          if (res && res.success) resolve(res.data);
-          else reject(new Error((res && res.error) || 'เกิดข้อผิดพลาด'));
-        })
-        .withFailureHandler(function(err) { reject(new Error(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ')); })
-        .handleApiCall('registerStaffPublic', { data: data });
-    });
+    const apiFn = typeof api === 'function' ? api : window.api;
+    await apiFn('registerStaffPublic', { data: data });
     if (typeof showToast === 'function') showToast('ลงทะเบียนสำเร็จ! เข้าสู่ระบบด้วยเลขบัตรประชาชน รหัสผ่านคือเบอร์โทรศัพท์', 'success');
     window.closeRegisterForm();
   } catch(err) {
