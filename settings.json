@@ -1,0 +1,11 @@
+{
+  "models": [
+    {
+      "id": "deepseek-v4-pro",
+      "provider": "openai-compatible",
+      "endpoint": "https://api.deepseek.com/v1/chat/completions",
+      "apiKeyEnv": "sk-e33d696fd280471ab2caacea126a648e",
+      "contextWindow": 1048576
+    }
+  ]
+}

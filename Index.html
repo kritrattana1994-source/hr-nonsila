@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<?!= include('ChartJS'); ?>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบบริหารบุคลากร กลุ่มงานการพยาบาล</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&amp;family=Noto+Sans+Thai:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+
+
+
+<?!= include('Styles'); ?>
+
+</head>
+<body>
+
+<!-- ══════════════ LOGIN PAGE ══════════════ -->
+<div id="loginPage" class="login-page">
+  <div class="login-bg">
+    <div class="login-blob b1"></div>
+    <div class="login-blob b2"></div>
+    <div class="login-blob b3"></div>
+  </div>
+  <div class="login-card glass">
+    <div class="login-logo">
+      <div class="logo-circle">
+        <i class="fas fa-hospital-user"></i>
+      </div>
+      <h1>โรงพยาบาลโนนศิลา</h1>
+      <p>ระบบบริหารบุคลากร กลุ่มงานการพยาบาล</p>
+    </div>
+    <form id="loginForm" class="login-form" onsubmit="window.handleLoginSubmit(event)">
+      <div class="form-group">
+        <label><i class="fas fa-user"></i> ชื่อผู้ใช้</label>
+        <input type="text" id="loginUser" value="admin" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label><i class="fas fa-lock"></i> รหัสผ่าน</label>
+        <div class="input-pw-wrap">
+          <input type="password" id="loginPass" value="admin" required autocomplete="current-password">
+          <button type="button" onclick="window.togglePw()" class="btn-eye"><i class="fas fa-eye" id="eyeIcon"></i></button>
+        </div>
+      </div>
+      <div id="loginError" class="login-error hidden"></div>
+      <button type="submit" class="btn-login" id="loginBtn">
+        <span id="loginBtnText"><i class="fas fa-sign-in-alt"></i> เข้าสู่ระบบ</span>
+        <span id="loginBtnLoad" class="hidden"><i class="fas fa-spinner fa-spin"></i> กำลังตรวจสอบ...</span>
+      </button>
+      <button type="button" onclick="window.showRegisterForm()" style="width:100%; margin-top:0.85rem; background:#eff6ff; color:#1d4ed8; border:1.5px solid #bfdbfe; border-radius:12px; padding:0.75rem; font-size:0.92rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.5rem; transition:all 0.2s; box-shadow:0 2px 8px rgba(29,78,216,0.1);">
+        <i class="fas fa-user-plus" style="color:#2563eb"></i> ลงทะเบียนพนักงานใหม่
+      </button>
+    </form>
+    <p class="login-ver">Nursing Service Organization v1.0</p>
+  </div>
+  
+  <div id="registerCard" class="login-card glass hidden" style="width:100%; max-width:700px; margin: 2rem auto; max-height:85vh; overflow-y:auto; text-align:left;">
+    <!-- Will be filled by JavaScript.html -->
+  </div>
+</div>
+
+<!-- ══════════════ MAIN APP ══════════════ -->
+<div id="mainApp" class="app hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="logo-icon"><i class="fas fa-hospital-user"></i></div>
+        <div class="logo-text">
+          <span class="logo-main">โรงพยาบาลโนนศิลา</span>
+          <span class="logo-sub">กลุ่มงานการพยาบาล</span>
+        </div>
+      </div>
+      <button class="sidebar-toggle" onclick="window.toggleSidebar()"><i class="fas fa-bars"></i></button>
+    </div>
+
+        <nav class="sidebar-nav">
+      <div class="nav-section">
+        <span class="nav-label">เมนูหลัก</span>
+        <a href="#" class="nav-item active" id="navDashboard" data-page="dashboard" onclick="window.navigate('dashboard',this)">
+          <i class="fas fa-home"></i><span>หน้าแรก (Dashboard)</span>
+        </a>
+        <a href="#" class="nav-item" id="navStaffList" data-page="staffList" onclick="window.navigate('staffList',this)">
+          <i class="fas fa-users"></i><span>รายชื่อบุคลากร</span>
+        </a>
+        <a href="#" class="nav-item hidden" id="navMyProfile" data-page="profile" onclick="window.viewProfile(State.user.staffId)">
+          <i class="fas fa-user-circle"></i><span>ข้อมูลของฉัน</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <span class="nav-label">การจัดการ</span>
+        <a href="#" class="nav-item" id="navOnboarding" data-page="onboarding" onclick="window.navigate('onboarding',this)">
+          <i class="fas fa-user-plus"></i><span>รับพนักงานใหม่</span>
+        </a>
+        <a href="#" class="nav-item" id="navCompetencies" data-page="competencies" onclick="window.navigate('competencies',this)">
+          <i class="fas fa-graduation-cap"></i><span>สมรรถนะบุคลากร</span>
+        </a>
+      </div>
+
+      <div class="nav-section" id="adminNav">
+        <span class="nav-label">ผู้ดูแลระบบ</span>
+        <a href="#" class="nav-item" data-page="users" onclick="window.navigate('users',this)">
+          <i class="fas fa-user-shield"></i><span>จัดการผู้ใช้งาน</span>
+        </a>
+        <a href="#" class="nav-item" data-page="import" onclick="window.navigate('import',this)">
+          <i class="fas fa-file-import"></i><span>นำเข้าข้อมูล</span>
+        </a>
+        <hr style="border: 0; border-top: 1px dashed #e2e8f0; margin: 0.5rem 0.75rem;">
+        <a href="#" id="sidebarSheetLink" target="_blank" class="nav-item" style="color: #10b981;">
+          <i class="fas fa-file-excel"></i><span>Google Sheet</span>
+        </a>
+        <a href="#" id="sidebarDriveLink" target="_blank" class="nav-item" style="color: #2563eb;">
+          <i class="fas fa-folder-open"></i><span>ที่เก็บไฟล์ Drive</span>
+        </a>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
+        <div class="user-detail">
+          <span id="sidebarUserName" class="user-name">-</span>
+          <span id="sidebarUserRole" class="user-role">-</span>
+        </div>
+      </div>
+      <button class="btn-logout" onclick="window.handleLogout()" title="ออกจากระบบ">
+        <i class="fas fa-sign-out-alt"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Top Bar -->
+    <header class="topbar" style="background:#fff; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; padding:0.75rem 1.5rem; height:60px;">
+      <div class="topbar-left" style="display:flex; align-items:center; gap:1rem;">
+        <button class="sidebar-toggle-mobile" onclick="window.toggleSidebar()" style="background:none; border:none; font-size:1.25rem; color:#64748b; cursor:pointer;"><i class="fas fa-bars"></i></button>
+        <div class="breadcrumb" style="font-size:1.25rem; font-weight:700; color:#1e293b;">
+          <span id="pageTitle">หน้าแรก</span>
+        </div>
+      </div>
+      <div class="topbar-right" style="display:flex; align-items:center; gap:1rem;">
+        <div id="licenseAlert" class="alert-badge hidden" style="background:#fee2e2; color:#ef4444; padding:0.25rem 0.5rem; border-radius:12px; font-size:0.8rem; cursor:pointer;" onclick="navigate('staffList', null)">
+          <i class="fas fa-exclamation-triangle"></i>
+          <span id="licenseAlertCount">0</span>
+        </div>
+        <button class="btn-icon" onclick="window.navigate('users', null)" title="บัญชีของฉัน" style="background:none; border:none; color:#64748b; font-size:1.25rem; cursor:pointer;">
+          <i class="fas fa-user-cog"></i>
+        </button>
+        <span class="topbar-user" id="topbarUser" style="font-weight:600; color:#475569;"></span>
+      </div>
+    </header>
+
+    <!-- Page Container -->
+    <div class="page-container" id="pageContainer">
+      <!-- Pages rendered here dynamically -->
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════ MODALS ══════════════ -->
+
+<!-- Staff Modal -->
+<div class="modal-overlay hidden" id="staffModal">
+  <div class="modal glass-dark" style="max-width:750px">
+    <div class="modal-header">
+      <h3 id="staffModalTitle">เพิ่มบุคลากร</h3>
+      <button class="btn-close" onclick="window.closeModal('staffModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="staffModalBody"></div>
+  </div>
+</div>
+
+<!-- Training Modal -->
+<div class="modal-overlay hidden" id="trainingModal">
+  <div class="modal glass-dark" style="max-width:600px">
+    <div class="modal-header">
+      <h3 id="trainingModalTitle">บันทึกการอบรม</h3>
+      <button class="btn-close" onclick="window.closeModal('trainingModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="trainingModalBody"></div>
+  </div>
+</div>
+
+<!-- User Modal -->
+<div class="modal-overlay hidden" id="userModal">
+  <div class="modal glass-dark" style="max-width:500px">
+    <div class="modal-header">
+      <h3 id="userModalTitle">เพิ่มผู้ใช้งาน</h3>
+      <button class="btn-close" onclick="window.closeModal('userModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="userModalBody"></div>
+  </div>
+</div>
+
+<!-- Org Chart Add Modal -->
+<div class="modal-overlay hidden" id="orgModal">
+  <div class="modal glass-dark" style="max-width:420px;">
+    <div class="modal-header">
+      <h3 id="orgModalTitle">เลือกพนักงานเข้ารายงานตัว</h3>
+      <button class="btn-close" onclick="window.closeModal('orgModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="orgModalBody" style="padding: 1rem;">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay hidden" id="confirmModal">
+  <div class="modal glass-dark" style="max-width:400px;text-align:center">
+    <div class="modal-body" style="padding:2rem">
+      <div style="font-size:3rem;margin-bottom:1rem;color:var(--danger)"><i class="fas fa-exclamation-circle"></i></div>
+      <h3 id="confirmTitle" style="margin-bottom:.5rem">ยืนยันการลบ</h3>
+      <p id="confirmMsg" style="color:var(--text-secondary);margin-bottom:1.5rem"></p>
+      <div style="display:flex;gap:1rem;justify-content:center">
+        <button class="btn btn-outline" onclick="window.closeModal('confirmModal')">ยกเลิก</button>
+        <button class="btn btn-danger" id="confirmOkBtn">ยืนยัน</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+  <?!= include('CompetenciesJS'); ?>
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

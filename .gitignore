@@ -1,0 +1,15 @@
+# Backup files
+*.bak
+*.bak2
+*.bak3
+
+# Temp/output files
+full_output.txt
+extracted.json
+
+# Node modules (if any)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2455 @@
+<script>
+// showApp replaced
+function showLogin() { 
+  var lp = document.getElementById('loginPage'); 
+  var ma = document.getElementById('mainApp'); 
+  if (lp) lp.classList.remove('hidden'); 
+  if (ma) ma.classList.add('hidden'); 
+}
+
+// ══════════════════════════════════════════════════
+    window.handleLoginSubmit = function(e) {
+    if (e) e.preventDefault();
+    if (typeof window.executeLogin === 'function') {
+      window.executeLogin(e);
+    }
+  };
+
+    window.executeLogin = async function(e) {
+    if (e) e.preventDefault();
+    var userEl = document.getElementById('loginUser');
+    var passEl = document.getElementById('loginPass');
+    if (!userEl || !passEl) return;
+
+    var user = userEl.value.trim();
+    var pass = passEl.value;
+    var errEl = document.getElementById('loginError');
+    var btn   = document.getElementById('loginBtn');
+    var btnText = document.getElementById('loginBtnText');
+    var btnLoad = document.getElementById('loginBtnLoad');
+
+    if (errEl) errEl.classList.add('hidden');
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.classList.add('hidden');
+    if (btnLoad) btnLoad.classList.remove('hidden');
+
+    try {
+      var res = await window.api('login', { username: user, password: pass });
+      console.log('Login response:', res);
+
+      var userObj = (res && res.user) ? res.user : (res || {});
+      var tokenVal = (res && res.token) ? res.token : (userObj.token || 'session_' + Date.now());
+
+      if (!window.State) window.State = {};
+      window.State.token = tokenVal;
+      window.State.user  = {
+        userId: userObj.id || userObj.userId || 1,
+        username: userObj.username || user,
+        role: String(userObj.role || 'low').toLowerCase(),
+        name: userObj.name || userObj.username || user || 'ผู้ใช้งาน',
+        staffId: userObj.staffId || null,
+        dept: userObj.dept || ''
+      };
+
+      if (typeof State !== 'undefined') {
+        State.token = window.State.token;
+        State.user  = window.State.user;
+      }
+
+      if (typeof window.safeSetItem === 'function') {
+        window.safeSetItem('hr_token', window.State.token);
+        window.safeSetItem('hr_user',  JSON.stringify(window.State.user));
+      } else if (typeof safeSetItem === 'function') {
+        safeSetItem('hr_token', window.State.token);
+        safeSetItem('hr_user',  JSON.stringify(window.State.user));
+      }
+
+      // Directly toggle page visibility to ensure login screen disappears immediately
+      const loginP = document.getElementById('loginPage');
+      const mainA  = document.getElementById('mainApp');
+      if (loginP) loginP.classList.add('hidden');
+      if (mainA)  mainA.classList.remove('hidden');
+
+      if (typeof window.showApp === 'function') {
+        try { if (typeof window.showApp === "function") window.showApp(); } catch(sErr){ console.error('showApp err:', sErr); }
+      }
+
+      if (typeof window.navigate === 'function') {
+        try { await window.navigate('dashboard'); } catch(nErr){ console.error('Nav err:', nErr); }
+      }
+
+      if (typeof window.showToast === 'function') {
+        window.showToast('ยินดีต้อนรับ ' + window.State.user.name, 'success');
+      }
+    } catch(err) {
+      console.error('Login error:', err);
+      if (errEl) {
+        errEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + (err.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+        errEl.classList.remove('hidden');
+      }
+      if (typeof window.showToast === 'function') window.showToast(err.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnText) btnText.classList.remove('hidden');
+      if (btnLoad) btnLoad.classList.add('hidden');
+    }
+  };
+
+
+(function() {
+// ══════════════════════════════════════════════════
+// APP.JS — Core Application Logic
+// ══════════════════════════════════════════════════
+
+let APP_URL = '';
+try { APP_URL = window.location.href.split('?')[0]; } catch(e) {}
+
+// ── Storage helpers (safe for GAS environment - persistent across F5) ──
+function safeGetItem(key) {
+  let val = null;
+  try { val = window.localStorage.getItem(key); } catch(e) {}
+  if (!val) {
+    try { val = window.sessionStorage.getItem(key); } catch(e) {}
+  }
+  return val;
+}
+function safeSetItem(key, val) {
+  try { window.localStorage.setItem(key, val); } catch(e) {}
+  try { window.sessionStorage.setItem(key, val); } catch(e) {}
+}
+function safeRemoveItem(key) {
+  try { window.localStorage.removeItem(key); } catch(e) {}
+  try { window.sessionStorage.removeItem(key); } catch(e) {}
+}
+function safeJSONParse(str) {
+  if (!str || str === 'undefined') return null;
+  try { return JSON.parse(str); } catch(e) { return null; }
+}
+
+// ── Toast & Modal Helpers (Defined Early) ──
+let toastTimer;
+function showToast(msg, type='success') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  const icons = { success:'check-circle', error:'exclamation-circle', info:'info-circle' };
+  el.innerHTML = `<i class="fas fa-${icons[type]||'info-circle'}"></i>${msg}`;
+  el.className = `toast ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = 'toast hidden', 3500);
+}
+window.showToast = showToast;
+
+function openModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('hidden');
+}
+window.openModal = openModal;
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('hidden');
+}
+window.closeModal = closeModal;
+
+// ── State ─────────────────────────────────────────
+  const State = {
+    token: safeGetItem('hr_token') || '',
+    user: safeJSONParse(safeGetItem('hr_user')),
+    page: 'dashboard',
+    staffList: [],
+    courseList:[],
+    charts: {}
+  };
+  window.State = State;
+
+  function internalShowApp() {
+    var lp = document.getElementById('loginPage');
+    var ma = document.getElementById('mainApp');
+    if (lp) lp.classList.add('hidden');
+    if (ma) ma.classList.remove('hidden');
+
+    if (State.user) {
+      var uName = State.user.name || State.user.username || '';
+      var uRole = State.user.role === 'admin' ? 'ผู้ดูแลระบบ' : 'ผู้ใช้งาน';
+      var elU = document.getElementById('sidebarUserName');
+      var elR = document.getElementById('sidebarUserRole');
+      var elT = document.getElementById('topbarUser');
+      var elA = document.getElementById('adminNav');
+      
+      if (elU) elU.textContent = uName;
+      if (elR) elR.textContent = uRole;
+      if (elT) elT.textContent = uName;
+      if (elA) {
+        if (State.user.role !== 'admin') {
+          elA.classList.add('hidden');
+        } else {
+          elA.classList.remove('hidden');
+        }
+      }
+      if (typeof loadAndApplyMenuPermissions === 'function') {
+        loadAndApplyMenuPermissions();
+      }
+    }
+  }
+  window.showApp = internalShowApp;
+  window.doNavigate = doNavigateInternal;
+window.navigate = doNavigateInternal;
+
+function api(action, params={}) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(res => {
+        if (res && res.success) {
+          resolve(res.data);
+        } else {
+          reject(new Error((res && res.error) || 'เกิดข้อผิดพลาด'));
+        }
+      })
+      .withFailureHandler(err => {
+        reject(new Error((err && err.message) || 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์'));
+      })
+      .handleApiCall(action, { token: State.token, ...params });
+  });
+}
+window.api = api;
+
+
+
+  window.renderDashboard = renderDashboard;
+  window.renderStaffList = renderStaffList;
+
+  window.renderCompetencies = renderCompetencies;
+  window.renderUsers = renderUsers;
+  window.renderImport = renderImport;
+
+async function loadAndApplyMenuPermissions() {
+  try {
+    const permissions = await api('getMenuPermissions');
+    State.menuPermissions = permissions;
+    applyMenuPermissions(permissions);
+  } catch(e) {
+    console.error('Failed to load menu permissions:', e);
+  }
+}
+
+function applyMenuPermissions(permissions) {
+  if (!permissions || !Array.isArray(permissions)) return;
+  const userRole = (State.user && State.user.role) ? State.user.role : 'low';
+
+  const menuElementMap = {
+    dashboard:  document.getElementById('navDashboard'),
+    staffList:  document.getElementById('navStaffList'),
+    onboarding: document.getElementById('navOnboarding'),
+    competencies: document.getElementById('navCompetencies'),
+    users:      document.querySelector('.nav-item[data-page="users"]'),
+    import:     document.querySelector('.nav-item[data-page="import"]'),
+    sheetLink:  document.getElementById('sidebarSheetLink'),
+    driveLink:  document.getElementById('sidebarDriveLink'),
+  };
+
+  permissions.forEach(m => {
+    const el = menuElementMap[m.menuId];
+    if (el) {
+      const canAccess = (userRole === 'admin') ? true : !!m[userRole];
+      if (canAccess) {
+        el.style.display = '';
+        el.classList.remove('hidden');
+      } else {
+        el.style.display = 'none';
+        el.classList.add('hidden');
+      }
+    }
+  });
+
+  // Admin Nav Section Visibility
+  const adminNav = document.getElementById('adminNav');
+  if (adminNav) {
+    const usersItem  = document.querySelector('.nav-item[data-page="users"]');
+    const importItem = document.querySelector('.nav-item[data-page="import"]');
+    const sheetItem  = document.getElementById('sidebarSheetLink');
+    const driveItem  = document.getElementById('sidebarDriveLink');
+
+    const hasAnyAdminItem = [usersItem, importItem, sheetItem, driveItem].some(el => el && el.style.display !== 'none');
+    if (hasAnyAdminItem) {
+      adminNav.style.display = '';
+      adminNav.classList.remove('hidden');
+    } else {
+      adminNav.style.display = 'none';
+      adminNav.classList.add('hidden');
+    }
+  }
+
+  // If user is Low role and has limited menu, ensure profile link is accessible
+  if (userRole === 'low') {
+    const myProfile = document.getElementById('navMyProfile');
+    if (myProfile) {
+      myProfile.style.display = '';
+      myProfile.classList.remove('hidden');
+    }
+  }
+}
+
+// ── Auth helpers ──────────────────────────────────
+
+function togglePw() {
+  const input = document.getElementById('loginPass');
+  const icon  = document.getElementById('eyeIcon');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.className = 'fas fa-eye-slash';
+  } else {
+    input.type = 'password';
+    icon.className = 'fas fa-eye';
+  }
+}
+window.togglePw = togglePw;
+
+// ── Router ────────────────────────────────────────
+const pageTitles = {
+  dashboard:'Dashboard',
+  staffList:'รายชื่อบุคลากร',
+  profile:  'แฟ้มบุคคล',
+  training:  'สมรรถนะบุคลากร',
+    competencies: 'สมรรถนะบุคลากร',
+  courses:  'ทะเบียนหลักสูตร',
+  reports:  'รายงาน',
+  users:    'จัดการผู้ใช้งาน',
+  import:   'นำเข้าข้อมูล',
+  
+  onboarding: 'รับพนักงานใหม่',
+};
+
+async function doNavigateInternal(page, linkEl) {
+  localStorage.setItem('hr_last_page', page);
+  State.page = page;
+  document.getElementById('pageTitle').textContent = pageTitles[page] || page;
+
+  // Update active nav
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.id === ('nav' + page.charAt(0).toUpperCase() + page.slice(1)) || el.dataset.page === page);
+  });
+  window.doNavigate = doNavigateInternal;
+window.navigate = doNavigateInternal;
+
+  const container = document.getElementById('pageContainer');
+  container.innerHTML = '<div className="loading"><div class="spinner"></div><span>กำลังโหลด...</span></div>';
+
+  try {
+    switch(page) {
+      case 'dashboard': await renderDashboard(); break;
+      case 'staffList': await renderStaffList(); break;
+      case 'onboarding': await renderOnboarding(); break;
+      
+      case 'training':      await window.renderTraining();  break;
+      case 'competencies':  await window.renderCompetencies();  break;
+      case 'courses':   await renderCourses();   break;
+      case 'reports':   await renderReports();   break;
+      case 'users':     await renderUsers();     break;
+      case 'import':    renderImport();           break;
+      default: container.innerHTML = '<p>ไม่พบหน้า</p>';
+    }
+  } catch(err) {
+    if (err.message.includes('Session') || err.message.includes('เข้าสู่ระบบ')) {
+      showToast('กรุณาเข้าสู่ระบบใหม่', 'error');
+      handleLogout();
+    } else {
+      container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${err.message}</p></div>`;
+    }
+  }
+}
+
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+// ── Modal listener ────────────────────────────────
+document.addEventListener('click', e => {
+  if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) closeModal(e.target.id);
+});
+
+function confirmAction(title, msg, onOk) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMsg').textContent   = msg;
+  const btn = document.getElementById('confirmOkBtn');
+  btn.onclick = () => { closeModal('confirmModal'); onOk(); };
+  openModal('confirmModal');
+}
+
+// ── Chart Rendering Helper ────────────────────────
+const chartInstances = {};
+
+function renderChart(canvasId, type, labels, dataValues, legendLabel, colors, retries) {
+  retries = retries || 0;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  if (chartInstances[canvasId]) {
+    chartInstances[canvasId].destroy();
+  }
+
+  if (typeof Chart === 'undefined') {
+    if (retries < 10) {
+      setTimeout(function() {
+        renderChart(canvasId, type, labels, dataValues, legendLabel, colors, retries + 1);
+      }, 400);
+    } else {
+      console.warn('Chart.js could not be loaded after 10 retries for ' + canvasId);
+    }
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  const bgColors = Array.isArray(colors) ? [...colors] : [colors];
+  while (bgColors.length < (labels ? labels.length : 0)) {
+    bgColors.push(...bgColors);
+  }
+  const sliceColors = bgColors.slice(0, labels ? labels.length : 0);
+
+  try {
+    chartInstances[canvasId] = new Chart(ctx, {
+      type: type,
+      data: {
+        labels: labels || [],
+        datasets: [{
+          label: legendLabel || '',
+          data: dataValues || [],
+          backgroundColor: type === 'bar' ? sliceColors : sliceColors,
+          borderColor: type === 'bar' ? 'transparent' : '#ffffff',
+          borderWidth: type === 'bar' ? 0 : 2,
+          borderRadius: type === 'bar' ? 6 : 0,
+          borderSkipped: false
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, legend: { display: type !== 'bar', position: 'bottom' }, plugins: { legend: {
+            display: type !== 'bar',
+            position: 'bottom',
+            labels: { padding: 12, font: { size: 11, family: "'Sarabun', sans-serif" } }
+          }
+        },
+        scales: type === 'bar' ? {
+          y: { beginAtZero: true, ticks: { precision: 0, font: { family: "'Sarabun', sans-serif" } }, grid: { color: 'rgba(0,0,0,0.04)' } },
+          x: { grid: { display: false }, ticks: { font: { family: "'Sarabun', sans-serif" } } }
+        } : {}
+      }
+    });
+  } catch(e) {
+    console.error('Error rendering chart ' + canvasId + ':', e);
+  }
+}
+
+// ══════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════
+async function renderDashboard() {
+  const c = document.getElementById('pageContainer');
+  c.innerHTML = '<div className="loading"><div class="spinner"></div><span>กำลังโหลดข้อมูล Dashboard...</span></div>';
+
+  try {
+    const data = await api('getDashboardData');
+
+  // License alerts badge in topbar
+  if (data.licenseAlerts && data.licenseAlerts.length) {
+    const el = document.getElementById('licenseAlert');
+    el.classList.remove('hidden');
+    document.getElementById('licenseAlertCount').textContent = data.licenseAlerts.length + ' แจ้งเตือน';
+  }
+
+  const deptLabels   = Object.keys(data.byDept);
+  const deptValues   = Object.values(data.byDept);
+  const typeLabels   = Object.keys(data.byType);
+  const typeValues   = Object.values(data.byType);
+  const groupLabels  = Object.keys(data.byGroup);
+  const groupValues  = Object.values(data.byGroup);
+  const eduLabels    = Object.keys(data.byEducation);
+  const eduValues    = Object.values(data.byEducation);
+  const ageLabels    = Object.keys(data.byAgeRange);
+  const ageValues    = Object.values(data.byAgeRange);
+  const tenureLabels = Object.keys(data.byTenureRange);
+  const tenureValues = Object.values(data.byTenureRange);
+
+  const now = new Date();
+  const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+  const thaiDays = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  const dateString = `วัน${thaiDays[now.getDay()]} ที่ ${now.getDate()} ${thaiMonths[now.getMonth()]} ${now.getFullYear() + 543}`;
+
+  c.innerHTML = `
+    <!-- Doc Hub Style Hero Banner (Hospital HR Context) -->
+    <div class="doc-hero-card">
+      <div class="doc-hero-content">
+        <div style="font-size: 1.05rem; color: var(--primary); margin-bottom: 0.75rem; font-weight: 600; opacity: 0.9; background: rgba(255,255,255,0.7); display: inline-block; padding: 4px 12px; border-radius: 20px;">
+          <i class="far fa-calendar-alt"></i> ${dateString} &nbsp;|&nbsp; <i class="far fa-clock"></i> <span id="heroClock">${now.toLocaleTimeString('th-TH')}</span>
+        </div>
+        <h1 class="doc-hero-title">ระบบบริหารบุคลากร กลุ่มงานการพยาบาล</h1>
+        <p class="doc-hero-subtitle">โรงพยาบาลโนนศิลา — บริหารจัดการข้อมูลบุคลากร ทะเบียนพยาบาล/AEMT ใบประกอบวิชาชีพ และประวัติการอบรมสมรรถนะอย่างมีประสิทธิภาพ</p>
+        <div class="doc-hero-pills">
+          <div class="doc-hero-pill"><i class="fas fa-shield-alt"></i> ปลอดภัย & กำหนดสิทธิ์</div>
+          <div class="doc-hero-pill"><i class="fas fa-user-nurse"></i> ทะเบียนบุคลากรพยาบาล</div>
+          <div class="doc-hero-pill"><i class="fas fa-chart-line"></i> รายงานสถิติอัตโนมัติ</div>
+        </div>
+      </div>
+      <!-- 3D Hero Illustration Graphic -->
+      <div class="doc-hero-illustration">
+        <div class="doc-hero-graphic-circle">
+          <div class="doc-hero-graphic-folder">
+            <i class="fas fa-hospital-user"></i>
+          </div>
+          <div class="doc-hero-graphic-shield">
+            <i class="fas fa-user-check"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${(State.user.role !== 'low' && data.birthdaysThisMonth) ? `
+    <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #ffffff 0%, #fff5f8 100%); border-top: 4px solid #ec4899;">
+      <div class="card-header" style="border-bottom:none; cursor:pointer;" onclick="document.getElementById('birthdayContent').classList.toggle('hidden')">
+        <h3 class="card-title" style="color:#ec4899; margin: 0; display:flex; align-items:center; justify-content:space-between; width:100%; font-size:1.1rem;">
+          <span><i class="fas fa-birthday-cake" style="margin-right:8px;"></i> เดือนนี้มีวันเกิดพนักงาน ${data.birthdaysThisMonth.length} ท่าน (คลิกเพื่อขยายดูรายละเอียด)</span>
+          <i class="fas fa-chevron-down" style="color:#ec4899; opacity:0.7;"></i>
+        </h3>
+      </div>
+      <div id="birthdayContent" class="hidden">
+        <div class="card-body" style="padding-top:1rem;">
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:2rem;">
+          <div>
+            <h4 style="margin-bottom:1rem; color:var(--text); font-size:1.05rem; font-weight:600; display:flex; align-items:center; gap:8px;"><div style="width:32px; height:32px; border-radius:50%; background:#fce7f3; color:#db2777; display:flex; align-items:center; justify-content:center;"><i class="fas fa-calendar-day"></i></div> เดือนนี้</h4>
+            ${data.birthdaysThisMonth.length === 0 ? '<p style="color:var(--text-light);font-size:0.9rem; padding:1rem; background:white; border-radius:8px; text-align:center;">ไม่มีผู้ที่เกิดในเดือนนี้</p>' : 
+              '<ul style="list-style:none; padding:0; margin:0; background:white; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">' + data.birthdaysThisMonth.map(b => `
+                <li style="padding:1rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <div style="font-weight:600; font-size:0.95rem; color:var(--text);">${b.name}</div>
+                    <div style="font-size:0.8rem; color:var(--text-light); margin-top:4px;"><i class="fas fa-hospital-user" style="opacity:0.7;"></i> ${b.department}</div>
+                  </div>
+                  <div style="background:#fdf2f8; color:#be185d; padding:0.4rem 0.8rem; border-radius:20px; font-weight:700; font-size:1rem; box-shadow:inset 0 1px 3px rgba(0,0,0,0.05);">
+                    วันที่ ${b.date}
+                  </div>
+                </li>
+              `).join('') + '</ul>'
+            }
+          </div>
+          <div>
+            <h4 style="margin-bottom:1rem; color:var(--text); font-size:1.05rem; font-weight:600; display:flex; align-items:center; gap:8px;"><div style="width:32px; height:32px; border-radius:50%; background:#f3f4f6; color:#6b7280; display:flex; align-items:center; justify-content:center;"><i class="fas fa-calendar-alt"></i></div> เดือนหน้า</h4>
+            ${data.birthdaysNextMonth.length === 0 ? '<p style="color:var(--text-light);font-size:0.9rem; padding:1rem; background:white; border-radius:8px; text-align:center;">ไม่มีผู้ที่เกิดในเดือนหน้า</p>' : 
+              '<ul style="list-style:none; padding:0; margin:0; background:white; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">' + data.birthdaysNextMonth.map(b => `
+                <li style="padding:1rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <div style="font-weight:600; font-size:0.95rem; color:var(--text);">${b.name}</div>
+                    <div style="font-size:0.8rem; color:var(--text-light); margin-top:4px;"><i class="fas fa-hospital-user" style="opacity:0.7;"></i> ${b.department}</div>
+                  </div>
+                  <div style="background:#f3f4f6; color:#4b5563; padding:0.4rem 0.8rem; border-radius:20px; font-weight:700; font-size:1rem; box-shadow:inset 0 1px 3px rgba(0,0,0,0.05);">
+                    วันที่ ${b.date}
+                  </div>
+                </li>
+              `).join('') + '</ul>'
+            }
+          </div>
+        </div>
+      </div>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Row 1: Summary Stat Cards -->
+    <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 1.5rem;">
+      <div class="stat-card">
+        <div class="stat-icon green"><i class="fas fa-users"></i></div>
+        <div><div class="stat-value">${data.totalStaff}</div><div class="stat-label">บุคลากรทั้งหมด</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue"><i class="fas fa-graduation-cap"></i></div>
+        <div><div class="stat-value">${data.trainingCount}</div><div class="stat-label">รายการอบรม ปี ${data.currentYear}</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue" style="background:#e0f2fe;color:#0284c7;"><i class="fas fa-clock"></i></div>
+        <div><div class="stat-value">${data.totalTrainingDays}</div><div class="stat-label">วันอบรมสะสม (วัน)</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green" style="background:#e8f5e9;color:#2e7d32;"><i class="fas fa-percentage"></i></div>
+        <div><div class="stat-value">${data.trainingCoverage}%</div><div class="stat-label">ความครอบคลุมการอบรม</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red"><i class="fas fa-id-card"></i></div>
+        <div><div class="stat-value">${data.licenseAlerts.filter(a=>a.status==='expired').length}</div><div class="stat-label">ใบประกอบหมดอายุ</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon orange"><i class="fas fa-bell"></i></div>
+        <div><div class="stat-value">${data.licenseAlerts.filter(a=>a.status!=='expired').length}</div><div class="stat-label">ใกล้หมดอายุ (90 วัน)</div></div>
+      </div>
+    </div>
+
+    <!-- Row 2: Standard Charts (3 Charts) -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+      <div class="chart-card">
+        <div class="chart-title"><i class="fas fa-building"></i> จำนวนตามหน่วยงาน</div>
+        <div class="chart-container-wrap"><canvas id="deptChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><i class="fas fa-briefcase"></i> สัดส่วนประเภทตำแหน่ง</div>
+        <div class="chart-container-wrap"><canvas id="typeChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><i class="fas fa-chart-pie"></i> แยกตามกลุ่มงาน</div>
+        <div class="chart-container-wrap"><canvas id="groupChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Row 3: Advanced Analytics Charts (3 Charts) -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+      <div class="chart-card">
+        <div class="chart-title"><i class="fas fa-user-graduate"></i> ระดับการศึกษาของบุคลากร</div>
+        <div class="chart-container-wrap"><canvas id="eduChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><i class="fas fa-hourglass-half"></i> ช่วงอายุบุคลากร</div>
+        <div class="chart-container-wrap"><canvas id="ageChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title"><i class="fas fa-history"></i> สถิติอายุงานบุคลากร</div>
+        <div class="chart-container-wrap"><canvas id="tenureChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Row 4: Warnings & Alerts (Side by Side Cards) -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+      <!-- Column 1: License Alerts -->
+      <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-exclamation-triangle" style="color:var(--danger)"></i> แจ้งเตือนใบประกอบวิชาชีพ</div>
+        </div>
+        <div class="alert-list" style="max-height: 350px; overflow-y: auto; padding: 0.5rem 1rem;">
+          ${data.licenseAlerts && data.licenseAlerts.length ? data.licenseAlerts.slice(0,10).map(a => `
+            <div class="alert-item ${a.status}" style="margin-bottom: 0.5rem; display:flex; align-items:center; justify-content:space-between; padding:0.6rem 0.8rem; background:#fef2f2; border-radius:10px; border-left:4px solid #ef4444;">
+              <div style="display:flex;align-items:center;gap:0.6rem">
+                <i class="fas fa-${a.status==='expired'?'times-circle':'exclamation-circle'}" style="color:#ef4444"></i>
+                <div>
+                  <strong style="font-size:0.88rem;color:#0f172a">${a.name}</strong>
+                  <div style="font-size:0.78rem;color:#64748b">หมดอายุ: ${formatDate(a.expDate)}</div>
+                </div>
+              </div>
+              <span class="badge badge-${a.status==='expired'?'red':'orange'}" style="font-size:0.75rem;padding:0.25rem 0.6rem;border-radius:20px;font-weight:700">
+                ${0 > a.daysLeft ? 'หมดอายุแล้ว ' + Math.abs(a.daysLeft) + ' วัน' : 'อีก ' + a.daysLeft + ' วัน'}
+              </span>
+            </div>
+          `).join('') : '<p class="text-muted text-center" style="padding: 2rem;">ไม่มีแจ้งเตือนใบประกอบวิชาชีพ</p>'}
+        </div>
+      </div>
+
+      <!-- Column 2: Retirement Watch -->
+      <div class="card" style="margin-bottom: 0;">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-hourglass-end" style="color:#2563eb"></i> รายชื่อผู้ใกล้เกษียณอายุ (อายุ 58-60 ปี)</div>
+        </div>
+        <div class="alert-list" style="max-height: 350px; overflow-y: auto; padding: 0.5rem 1rem;">
+          ${data.retiringSoon && data.retiringSoon.length ? data.retiringSoon.map(r => `
+            <div class="alert-item warning" onclick="window.viewProfile(${r.id})" style="margin-bottom: 0.5rem; cursor: pointer; display:flex; align-items:center; justify-content:space-between; padding:0.6rem 0.8rem; background:#eff6ff; border-radius:10px; border-left:4px solid #2563eb;">
+              <div style="display:flex;align-items:center;gap:0.6rem">
+                <i class="fas fa-user-clock" style="color:#2563eb"></i>
+                <div>
+                  <strong style="font-size:0.88rem;color:#0f172a">${r.name}</strong>
+                  <div style="font-size:0.78rem;color:#64748b">${r.position} (${r.dept})</div>
+                </div>
+              </div>
+              <span class="badge" style="background:#2563eb; color:white; font-size:0.75rem; padding:0.25rem 0.6rem; border-radius:20px; font-weight:700">
+                อายุ ${r.age} ปี
+              </span>
+            </div>
+          `).join('') : '<p class="text-muted text-center" style="padding: 2rem;">ไม่มีบุคลากรใกล้เกษียณอายุ</p>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Render All 6 Hospital HR Charts
+  setTimeout(() => {
+    if (typeof Chart !== 'undefined') {
+    }
+
+    const colorsPrimary = ['#2563eb', '#0ea5e9', '#3b82f6', '#0284c7', '#60a5fa', '#93c5fd', '#1e40af', '#1e3a8a'];
+    const colorsPastel  = ['#93c5fd', '#bae6fd', '#cbd5e1', '#a78bfa', '#3b82f6', '#0ea5e9', '#60a5fa', '#38bdf8'];
+
+    // 1. Dept Chart
+    renderChart('deptChart', 'bar', deptLabels, deptValues, 'จำนวน (คน)', ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#1d4ed8']);
+
+    // 2. Type Chart
+    renderChart('typeChart', 'doughnut', typeLabels, typeValues, 'สัดส่วน', colorsPrimary);
+
+    // 3. Group Chart
+    renderChart('groupChart', 'pie', groupLabels, groupValues, 'กลุ่มงาน', colorsPrimary);
+
+    // 4. Edu Chart
+    renderChart('eduChart', 'doughnut', eduLabels, eduValues, 'การศึกษา', colorsPastel);
+
+    // 5. Age Chart
+    renderChart('ageChart', 'bar', ageLabels, ageValues, 'จำนวน (คน)', ['#8b5cf6', '#a78bfa', '#c4b5fd', '#7c3aed']);
+
+    // 6. Tenure Chart
+    renderChart('tenureChart', 'bar', tenureLabels, tenureValues, 'จำนวน (คน)', ['#f59e0b', '#fbbf24', '#fcd34d', '#d97706']);
+  }, 100);
+
+  if (window.heroClockInterval) clearInterval(window.heroClockInterval);
+  window.heroClockInterval = setInterval(() => {
+    const clockEl = document.getElementById('heroClock');
+    if (clockEl) {
+      const d = new Date();
+      clockEl.textContent = d.toLocaleTimeString('th-TH');
+    }
+  }, 1000);
+
+  } catch(err) {
+    console.error('renderDashboard error:', err);
+    c.innerHTML = `
+      <div class="empty-state" style="padding: 3rem 1rem;">
+        <i class="fas fa-exclamation-triangle" style="color:var(--danger);font-size:2.5rem;margin-bottom:1rem"></i>
+        <h3>ไม่สามารถโหลดข้อมูล Dashboard ได้</h3>
+        <p style="color:#64748b;margin-bottom:1.5rem">${err.message || 'เกิดข้อผิดพลาดในการโหลดข้อมูล'}</p>
+        <button class="btn btn-primary" onclick="window.navigate('dashboard')"><i class="fas fa-sync-alt"></i> ลองใหม่อีกครั้ง</button>
+      </div>
+    `;
+  }
+}
+// ══════════════════════════════════════════════════
+// ONBOARDING (NEW STAFF REGISTRATION)
+// ══════════════════════════════════════════════════
+async function renderOnboarding() {
+  const c = document.getElementById('pageContainer');
+  c.innerHTML = '<div class="loading"><div class="spinner"></div><span>กำลังโหลดข้อมูล...</span></div>';
+  
+  try {
+    // Load departments dynamically from database
+    let depts = [];
+    try {
+      depts = await api('getAllDepartments');
+    } catch(e) {
+      console.warn('Could not load departments:', e);
+    }
+    const deptOptions = depts.length
+      ? depts.map(d => `<option value="${d}">${d}</option>`).join('')
+      : '<option value="ER">ER</option><option value="IPD">IPD</option><option value="OPD">OPD</option><option value="จ่ายกลาง">จ่ายกลาง</option><option value="ห้องผ่าตัด">ห้องผ่าตัด</option><option value="ห้องคลอด">ห้องคลอด</option>';
+
+    c.innerHTML = `
+      <div class="card" style="max-width: 800px; margin: 0 auto 2rem auto;">
+        <div class="card-header" style="background: linear-gradient(135deg, var(--primary), var(--accent)); color: white; padding: 1.5rem 2rem; border-radius: 16px 16px 0 0;">
+          <div class="card-title" style="color: white; font-size: 1.25rem;"><i class="fas fa-user-plus"></i>ลงทะเบียนรับพนักงานใหม่</div>
+        </div>
+        <div style="padding: 2rem;">
+          <form onsubmit="window.saveOnboarding(event)" id="onboardingForm">
+            <div class="form-section">
+              <div class="form-section-title"><i class="fas fa-user"></i>ข้อมูลส่วนตัว (เข้าสู่ระบบด้วย เลขบัตรประชาชน และรหัสผ่านเป็น เบอร์โทรศัพท์)</div>
+              <div class="form-grid-2">
+                <div class="form-group"><label>ชื่อ-สกุล *</label><input name="name" required placeholder="นาย / นาง / นางสาว..."></div>
+                <div class="form-group"><label>ชื่อเล่น</label><input name="nickname" placeholder="เช่น ส้ม"></div>
+                <div class="form-group"><label>เลขบัตรประชาชน * (ใช้เป็นชื่อผู้ใช้สำหรับเข้าสู่ระบบ)</label><input name="idCard" required maxlength="13" pattern="[0-9]{13}" placeholder="เลขบัตรประชาชน 13 หลัก"></div>
+                <div class="form-group"><label>เบอร์โทรศัพท์ * (ใช้เป็นรหัสผ่านเริ่มต้นสำหรับเข้าสู่ระบบ)</label><input name="phone" required type="tel" placeholder="เช่น 0891234567"></div>
+                <div class="form-group"><label>สถานะภาพ</label>
+                  <select name="maritalStatus">
+                    <option>โสด</option><option>สมรส</option><option>หม้าย</option><option>หย่าร้าง</option>
+                  </select>
+                </div>
+                <div class="form-group"><label>วัน/เดือน/ปีเกิด</label><input type="date" name="dob"></div>
+                <div class="form-group" style="grid-column: 1/-1"><label>ที่อยู่</label><textarea name="address" rows="2" placeholder="ที่อยู่ปัจจุบัน"></textarea></div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="form-section-title"><i class="fas fa-briefcase"></i>ข้อมูลตำแหน่งและการทำงาน</div>
+              <div class="form-grid-2">
+                <div class="form-group"><label>ตำแหน่ง</label><input name="position" placeholder="เช่น พยาบาลวิชาชีพชำนาญการ"></div>
+                <div class="form-group"><label>ประเภทตำแหน่ง</label>
+                  <select name="empType">
+                    <option>ข้าราชการ</option><option>ลูกจ้างชั่วคราวรายเดือน</option><option>ลูกจ้างชั่วคราวรายวัน</option><option>พนักงานกระทรวง</option><option>พนักงานราชการ</option>
+                  </select>
+                </div>
+                <div class="form-group"><label>หน่วยงาน</label>
+                  <select name="dept" required>
+                    <option value="">เลือกหน่วยงาน...</option>
+                    ${deptOptions}
+                  </select>
+                </div>
+                <div class="form-group"><label>กลุ่มตำแหน่ง</label>
+                  <select name="group" id="onbGroupSelect" onchange="window.toggleOnboardingNurseFields()">
+                    <option value="พยาบาล">พยาบาล</option>
+                    <option value="AEMT">AEMT</option>
+                    <option value="พนักงาน">พนักงาน</option>
+                  </select>
+                </div>
+                <div class="form-group"><label>วันเริ่มทำงาน (รายเดือน)</label><input type="date" name="startMonthly"></div>
+                <div class="form-group"><label>วันเริ่มทำงาน (รายวัน)</label><input type="date" name="startDaily"></div>
+              </div>
+            </div>
+
+            <div class="form-section" id="onbNurseSection">
+              <div class="form-section-title"><i class="fas fa-id-card"></i>ข้อมูลใบประกอบวิชาชีพและงานข้าราชการ</div>
+              <div class="form-grid-2">
+                <div class="form-group"><label>เลขที่ใบประกอบวิชาชีพ</label><input name="licenseNo"></div>
+                <div class="form-group"><label>วันที่ออกใบประกอบ</label><input type="date" name="licenseIssue"></div>
+                <div class="form-group"><label>อายุใบประกอบ (ปี)</label><input name="licenseValidity" placeholder="5" type="number" min="1" max="10" value="5"></div>
+                <div class="form-group"><label>วันบรรจุข้าราชการ</label><input type="date" name="appointDate"></div>
+                <div class="form-group"><label>วันเกษียณราชการ</label><input type="date" name="retireDate"></div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <div class="form-section-title"><i class="fas fa-graduation-cap"></i>การศึกษาและข้อมูลอื่น ๆ</div>
+              <div class="form-grid-2">
+                <div class="form-group"><label>วุฒิการศึกษาสูงสุด</label>
+                  <select name="education">
+                    <option value="">-- ไม่ระบุ --</option><option>ปริญญาเอก</option><option>ปริญญาโท</option><option>ปริญญาตรี</option><option>อนุปริญญา</option><option>มัธยมปลาย</option><option>อื่นๆ</option>
+                  </select>
+                </div>
+                <div class="form-group"><label>สาขาการศึกษา</label><input name="major" placeholder="เช่น การพยาบาลศาสตร์"></div>
+                <div class="form-group"><label>สถาบันการศึกษา</label><input name="university" placeholder="เช่น มหาวิทยาลัยขอนแก่น"></div>
+                <div class="form-group"><label>การศึกษาต่อเนื่อง</label><input name="contEdu" placeholder="ประวัติอบรมสั้น/เฉพาะทาง"></div>
+                <div class="form-group" style="grid-column: 1/-1"><label>ข้อมูลสุขภาพ</label><textarea name="health" rows="2" placeholder="โรคประจำตัว / การแพ้ยา"></textarea></div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
+              <button type="button" class="btn btn-outline" onclick="window.navigate('dashboard')">ยกเลิก</button>
+              <button type="submit" class="btn btn-primary" id="onbSubmitBtn">
+                <i class="fas fa-save"></i>ลงทะเบียนบุคลากรใหม่
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+    toggleOnboardingNurseFields();
+  } catch(e) {
+    c.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>โหลดหน้าลงทะเบียนไม่สำเร็จ: ${e.message}</p></div>`;
+  }
+}
+
+function toggleOnboardingNurseFields() {
+  const grp = document.getElementById('onbGroupSelect').value;
+  const isNurse = grp === 'พยาบาล' || grp === 'AEMT';
+  const sec = document.getElementById('onbNurseSection');
+  if (sec) {
+    sec.style.display = isNurse ? 'block' : 'none';
+    sec.querySelectorAll('input').forEach(i => i.disabled = !isNurse);
+  }
+}
+
+async function saveOnboarding(e) {
+  e.preventDefault();
+  const btn = document.getElementById('onbSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึกข้อมูล...';
+  
+  const form = e.target;
+  const fd = new FormData(form);
+  const data = Object.fromEntries(fd.entries());
+  
+  const group = data.group;
+  if (group === 'พยาบาล' || group === 'AEMT') {
+    data.nurseData = {
+      licenseNo: fd.get('licenseNo'),
+      licenseIssue: fd.get('licenseIssue'),
+      licenseExpiry: fd.get('licenseValidity'),
+      appointDate: fd.get('appointDate'),
+      retireDate: fd.get('retireDate')
+    };
+  }
+  
+  try {
+    await api('addStaff', { data });
+    showToast('ลงทะเบียนพนักงานใหม่สำเร็จ และระบบสร้างบัญชีผู้ใช้งานระดับต่ำ (Low) ให้เรียบร้อยแล้ว', 'success');
+    await navigate('staffList');
+  } catch(err) {
+    showToast('ล้มเหลว: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-save"></i>ลงทะเบียนบุคลากรใหม่';
+  }
+}
+
+// ══════════════════════════════════════════════════
+// STAFF LIST
+// ══════════════════════════════════════════════════
+let staffFilters = { search:'', dept:'', group:'', type:'' };
+
+async function renderStaffList(filters) {
+  filters = filters || staffFilters;
+  const staff = await api('getStaffList', { filters });
+  State.staffList = staff;
+  const c = document.getElementById('pageContainer');
+
+  const depts  = staff.map(function(s) { return s.dept; }).filter(Boolean).filter(function(v, i, a) { return a.indexOf(v) === i; });
+  const groups = staff.map(function(s) { return s.group; }).filter(Boolean).filter(function(v, i, a) { return a.indexOf(v) === i; });
+  const types  = staff.map(function(s) { return s.type; }).filter(Boolean).filter(function(v, i, a) { return a.indexOf(v) === i; });
+
+  c.innerHTML = `
+    <div class="filters-bar" style="flex-wrap:wrap">
+      <div class="search-box">
+        <i class="fas fa-search"></i>
+        <input type="text" id="searchInput" placeholder="ค้นหาชื่อ, ชื่อเล่น, ตำแหน่ง..." value="${filters.search||''}"
+          oninput="debounceSearch(this.value)">
+      </div>
+      <select class="filter-select" id="filterStatus" onchange="window.applyFilters()">
+        <option value="active" ${(!filters.status || filters.status==='active')?'selected':''}>👥 พนักงานปัจจุบัน</option>
+        <option value="resigned" ${filters.status==='resigned'?'selected':''}>🔴 พ้นสภาพ (ลาออกแล้ว)</option>
+        <option value="all" ${filters.status==='all'?'selected':''}>📋 ทั้งหมด</option>
+      </select>
+      <select class="filter-select" id="filterDept" onchange="window.applyFilters()">
+        <option value="">ทุกหน่วยงาน</option>
+        ${depts.map(d=>`<option value="${d}" ${filters.dept===d?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <select class="filter-select" id="filterGroup" onchange="window.applyFilters()">
+        <option value="">ทุกกลุ่ม</option>
+        ${groups.map(g=>`<option value="${g}" ${filters.group===g?'selected':''}>${g}</option>`).join('')}
+      </select>
+      <select class="filter-select" id="filterType" onchange="window.applyFilters()">
+        <option value="">ทุกประเภท</option>
+        ${types.map(t=>`<option value="${t}" ${filters.type===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+      ${(State.user.role === 'admin' || State.user.role === 'high') ? `
+      <button class="btn btn-primary" onclick="window.openAddStaff()">
+        <i class="fas fa-plus"></i>เพิ่มบุคลากร
+      </button>
+      ` : ''}
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-users"></i>บุคลากรทั้งหมด</div>
+        <span class="badge badge-green">${staff.length} คน</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>#</th><th>รูป</th><th>ชื่อ-สกุล</th><th>ตำแหน่ง</th>
+            <th>ประเภท</th><th>หน่วยงาน</th><th>กลุ่ม</th><th>เบอร์โทร</th><th>อายุงาน</th><th>อายุราชการ</th><th>จัดการ</th>
+          </tr></thead>
+          <tbody>
+            ${staff.length ? staff.map((s,i) => `
+              <tr>
+                <td>${i+1}</td>
+                <td>${s.photoId
+                  ? `<img src="https:\/\/drive.google.com/uc?export=view&id=${s.photoId}" class="staff-photo" onerror="this.outerHTML=photoPlaceholder('${s.name}')">`
+                  : photoPlaceholder(s.name)
+                }</td>
+                <td>
+                  <div class="bold">${s.name}</div>
+                  <div class="text-sm text-muted">${s.nickname||''}</div>
+                  ${s.isResigned ? `<span class="badge" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;font-size:0.7rem;margin-top:0.2rem"><i class="fas fa-user-times"></i> ลาออก (${formatDate(s.resignDate)})</span>` : ''}
+                </td>
+                <td>${s.position||'-'}</td>
+                <td><span class="badge badge-${empTypeBadge(s.type)}">${s.type||'-'}</span></td>
+                <td>${s.dept||'-'}</td>
+                <td><span class="badge badge-blue">${s.group||'-'}</span></td>
+                <td>${s.phone||'-'}</td>
+                <td class="text-sm text-muted">${s.workDur||'-'}</td>
+                <td class="text-sm text-muted">${s.govDur||'-'}</td>
+                <td>
+                  <div style="display:flex;gap:.4rem">
+                    <button class="btn-icon-sm" onclick="window.viewProfile(${s.id})" title="ดูประวัติ" style="color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe;"><i class="fas fa-eye"></i></button>
+                    ${(State.user.role === 'admin' || State.user.role === 'high' || (State.user.role === 'medium' && String(s.dept) === String(State.user.dept)) || String(s.id) === String(State.user.staffId)) ? `
+                      <button class="btn-icon-sm btn-edit" onclick="window.openEditStaff(${s.id})" title="แก้ไข"><i class="fas fa-edit"></i></button>
+                    ` : ''}
+                    ${State.user.role === 'admin' ? `
+                      <button class="btn-icon-sm btn-del" onclick="window.deleteStaff(${s.id},'${s.name}')" title="ลบ"><i class="fas fa-trash"></i></button>
+                    ` : ''}
+                  </div>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="11" class="text-center text-muted" style="padding:2rem">ไม่พบข้อมูล</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function cleanPrefix(name) {
+  if (!name) return '';
+  let res = name;
+  const prefixes = ['นาย', 'นางสาว', 'นาง'];
+  for (let i = 0; i < prefixes.length; i++) {
+    if (res.indexOf(prefixes[i]) === 0) {
+      res = res.substring(prefixes[i].length);
+      break;
+    }
+  }
+  return res.trim();
+}
+
+function photoPlaceholder(name) {
+  const ch = name ? cleanPrefix(name).charAt(0) : '?';
+  return `<div class="staff-photo-placeholder">${ch}</div>`;
+}
+
+function empTypeBadge(type) {
+  if (!type) return 'gray';
+  if (type.includes('ข้าราชการ')) return 'green';
+  if (type.includes('ลูกจ้างชั่วคราวรายเดือน')) return 'orange';
+  if (type.includes('ลูกจ้างชั่วคราวรายวัน')) return 'orange';
+  if (type.includes('พนักงานกระทรวง')) return 'blue';
+  return 'gray';
+}
+
+let searchTimer;
+function debounceSearch(val) {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    staffFilters.search = val;
+    renderStaffList(staffFilters);
+  }, 350);
+}
+
+function applyFilters() {
+  staffFilters.dept  = (document.getElementById('filterDept') ? document.getElementById('filterDept').value : '')  || '';
+  staffFilters.group = (document.getElementById('filterGroup') ? document.getElementById('filterGroup').value : '');
+  staffFilters.type  = (document.getElementById('filterType') ? document.getElementById('filterType').value : '')  || '';
+  renderStaffList(staffFilters);
+}
+
+// ── Add/Edit Staff Modal ──────────────────────────
+
+function openAddStaff() {
+  document.getElementById('staffModalTitle').textContent = 'เพิ่มบุคลากรใหม่';
+  document.getElementById('staffModalBody').innerHTML = '<div className="loading"><div class="spinner"></div></div>';
+  openModal('staffModal');
+  
+  api('getStaffList')
+    .then(staff => {
+      document.getElementById('staffModalBody').innerHTML = staffForm({}, null, staff);
+    })
+    .catch(e => {
+      document.getElementById('staffModalBody').innerHTML = `<p class="text-center text-muted">ดึงรายชื่อบุคลากรไม่สำเร็จ: ${e.message}</p>`;
+    });
+}
+
+async function openEditStaff(id) {
+  document.getElementById('staffModalTitle').textContent = 'แก้ไขข้อมูลบุคลากร';
+  document.getElementById('staffModalBody').innerHTML = '<div className="loading"><div class="spinner"></div></div>';
+  openModal('staffModal');
+  try {
+    const [data, staff] = await Promise.all([
+      api('getStaff', { id }),
+      api('getStaffList')
+    ]);
+    const managerOptions = staff.filter(s => String(s.id) !== String(id));
+    document.getElementById('staffModalBody').innerHTML = staffForm(data, id, managerOptions);
+    // Fill nurse data
+    if (data.nurseData) {
+      Object.keys(data.nurseData).forEach(k => {
+        const el = document.getElementById('nf_' + k);
+        if (el) el.value = data.nurseData[k] || '';
+      });
+    }
+  } catch(e) {
+    document.getElementById('staffModalBody').innerHTML = `<p class="text-center text-muted">${e.message}</p>`;
+  }
+}
+
+function staffForm(d={}, id=null, staffList=[]) {
+  const isNurse = d.group === 'พยาบาล' || d.group === 'AEMT';
+  return `
+  <form onsubmit="window.saveStaff(event,${id})">
+    <div class="form-section">
+      <div class="form-section-title"><i class="fas fa-user"></i>ข้อมูลส่วนตัว</div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>ชื่อ-สกุล *</label><input name="name" value="${d.name||''}" required placeholder="นางสาว..."></div>
+        <div class="form-group"><label>ชื่อเล่น</label><input name="nickname" value="${d.nickname||''}"></div>
+        <div class="form-group"><label>เลขบัตรประชาชน</label><input name="idCard" value="${d.idCard||''}" maxlength="13" pattern="[0-9]{13}"></div>
+        <div class="form-group"><label>สถานะภาพ</label>
+          <select name="maritalStatus">
+            ${['โสด','สมรส','หม้าย','หย่าร้าง'].map(s=>`<option ${d.maritalStatus===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>วัน/เดือน/ปีเกิด</label><input type="date" name="dob" value="${d.dob||''}"></div>
+        <div class="form-group"><label>เบอร์โทร</label><input name="phone" value="${d.phone||''}" type="tel"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>ที่อยู่</label><textarea name="address" rows="2">${d.address||''}</textarea></div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title"><i class="fas fa-briefcase"></i>ข้อมูลตำแหน่ง</div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>ตำแหน่ง</label><input name="position" value="${d.position||''}"></div>
+        <div class="form-group"><label>ประเภทตำแหน่ง</label>
+          <select name="empType">
+            ${['ข้าราชการ','ลูกจ้างชั่วคราวรายเดือน','ลูกจ้างชั่วคราวรายวัน','พนักงานกระทรวง','พนักงานราชการ'].map(t=>`<option ${d.empType===t?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>หน่วยงาน</label>
+          <select name="dept">
+            ${['ER','IPD','OPD','จ่ายกลาง','กลุ่มงานการพยาบาล','ห้องผ่าตัด','ห้องคลอด','อุบัติเหตุ'].map(d2=>`<option ${d.dept===d2?'selected':''}>${d2}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>กลุ่ม</label>
+          <select name="group" id="staffGroupSelect" onchange="window.toggleNurseFields()">
+            ${['พยาบาล','AEMT','พนักงาน'].map(g=>`<option ${d.group===g?'selected':''}>${g}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>วันเริ่มทำงาน (รายเดือน)</label><input type="date" name="startMonthly" value="${d.startMonthly||''}"></div>
+        <div class="form-group"><label>วันเริ่มทำงาน (รายวัน)</label><input type="date" name="startDaily" value="${d.startDaily||''}"></div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title"><i class="fas fa-graduation-cap"></i>การศึกษา</div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>วุฒิการศึกษาสูงสุด</label>
+          <select name="education">
+            ${['ปริญญาตรี','ปริญญาโท','ปริญญาเอก','ปวส.','ปวช.','ม.6','ม.3','ป.6','อื่นๆ'].map(e=>`<option ${d.education===e?'selected':''}>${e}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>สาขา</label><input name="major" value="${d.major||''}"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>สถาบันที่จบ</label><input name="university" value="${d.university||''}"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>การศึกษาต่อเนื่อง/เฉพาะทาง</label><input name="contEdu" value="${d.contEdu||''}"></div>
+      </div>
+    </div>
+
+    <div class="form-section" id="nurseSection" ${!isNurse?'style="display:none"':''}>
+      <div class="form-section-title"><i class="fas fa-id-card"></i>ใบประกอบวิชาชีพ</div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>เลขที่ใบประกอบ</label><input id="nf_licenseNo" name="licenseNo" value="${d.nurseData ? d.nurseData.licenseNo || '' : ''}"></div>
+        <div class="form-group"><label>วันที่ออกใบประกอบ</label><input type="date" id="nf_licenseIssue" name="licenseIssue" value="${d.nurseData ? d.nurseData.licenseIssue || '' : ''}"></div>
+        <div class="form-group"><label>วันหมดอายุใบประกอบ</label><input type="date" id="nf_licenseExpiry" name="licenseExpiry" value="${d.nurseData ? d.nurseData.licenseExpiry || '' : ''}"></div>
+        <div class="form-group"><label>วันที่บรรจุข้าราชการ</label><input type="date" id="nf_appointDate" name="appointDate" value="${d.nurseData ? d.nurseData.appointDate || '' : ''}"></div>
+        <div class="form-group"><label>วันที่เกษียณ</label><input type="date" id="nf_retireDate" name="retireDate" value="${d.nurseData ? d.nurseData.retireDate || '' : ''}"></div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="btn btn-outline" onclick="window.closeModal('staffModal')">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i>บันทึก</button>
+    </div>
+  </form>`;
+}
+
+function toggleNurseFields() {
+  const group = document.getElementById('staffGroupSelect').value;
+  const sec   = document.getElementById('nurseSection');
+  if (sec) sec.style.display = (group === 'พยาบาล' || group === 'AEMT') ? '' : 'none';
+}
+
+async function saveStaff(e, id) {
+  e.preventDefault();
+  const form = e.target;
+  const fd   = new FormData(form);
+  const data = Object.fromEntries(fd.entries());
+
+  // Collect nurse data
+  const group = data.group;
+  if (group === 'พยาบาล' || group === 'AEMT') {
+    data.nurseData = {
+      licenseNo:    fd.get('licenseNo'),
+      licenseIssue: fd.get('licenseIssue'),
+      licenseExpiry:fd.get('licenseExpiry'),
+      appointDate:  fd.get('appointDate'),
+      retireDate:   fd.get('retireDate'),
+    };
+  }
+
+  try {
+    if (id) {
+      await api('updateStaff', { id, data });
+      showToast('แก้ไขข้อมูลสำเร็จ', 'success');
+    } else {
+      const res = await api('addStaff', { data });
+      showToast('เพิ่มบุคลากรสำเร็จ', 'success');
+    }
+    closeModal('staffModal');
+    renderStaffList(staffFilters);
+  } catch(err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteStaff(id, name) {
+  confirmAction('ลบข้อมูลบุคลากร', `ยืนยันการลบ "${name}" ออกจากระบบ?`, async () => {
+    try {
+      await api('deleteStaff', { id });
+      showToast('ลบข้อมูลสำเร็จ', 'success');
+      renderStaffList(staffFilters);
+    } catch(e) { showToast(e.message, 'error') }
+  });
+}
+
+// ══════════════════════════════════════════════════
+// PROFILE PAGE
+// ══════════════════════════════════════════════════
+async function viewProfile(id) {
+  localStorage.setItem('hr_last_page', 'profile');
+  localStorage.setItem('hr_last_profile_id', id);
+  State.page = 'profile';
+  document.getElementById('pageTitle').textContent = 'แฟ้มบุคคล';
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const c = document.getElementById('pageContainer');
+  c.innerHTML = '<div className="loading"><div class="spinner"></div><span>กำลังโหลด...</span></div>';
+
+  try {
+    const d = await api('getStaff', { id });
+    const licStatusClass = !d.nurseData ? '' :
+      d.nurseData.daysUntilExpiry === null ? '' :
+      0 > d.nurseData.daysUntilExpiry    ? 'license-expired' :
+      30 >= d.nurseData.daysUntilExpiry  ? 'license-critical' :
+      90 >= d.nurseData.daysUntilExpiry  ? 'license-warning'  : 'license-ok';
+
+    const licStatusText = !(d.nurseData && d.nurseData.licenseExpiry) ? 'ไม่มีข้อมูล' :
+      0 > d.nurseData.daysUntilExpiry   ? `หมดอายุแล้ว ${Math.abs(d.nurseData.daysUntilExpiry)} วัน` :
+      90 >= d.nurseData.daysUntilExpiry ? `ใกล้หมดอายุ (อีก ${d.nurseData.daysUntilExpiry} วัน)` :
+      `อีก ${d.nurseData.daysUntilExpiry} วัน`;
+
+    let photoHtml = '';
+    if (d.photoId) {
+      const init = cleanPrefix(d.name).charAt(0);
+      photoHtml = '<img src="https:\/\/drive.google.com/uc?export=view&id=' + d.photoId + '" class="profile-photo-large" id="profilePhoto">';
+    } else {
+      const init = cleanPrefix(d.name).charAt(0);
+      photoHtml = '<div class="profile-photo-large">' + init + '</div>';
+    }
+
+    const isLow = State.user.role === 'low';
+    const canEdit = State.user.role === 'admin' || State.user.role === 'high' || String(State.user.staffId) === String(d.id);
+
+    c.innerHTML = `
+      <!-- Back button -->
+      ${!isLow ? `
+      <button class="btn btn-outline btn-sm" style="margin-bottom:1rem" onclick="window.navigate('staffList')">
+        <i class="fas fa-arrow-left"></i>กลับ
+      </button>
+      ` : ''}
+
+      <!-- Resignation Alert Banner -->
+      ${d.resignDate || d['วันที่ลาออก'] ? `
+      <div style="background:#fef2f2; border:1.5px solid #fca5a5; border-left:6px solid #ef4444; border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.25rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+        <div style="display:flex; align-items:center; gap:1rem">
+          <div style="background:#fee2e2; color:#ef4444; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.3rem">
+            <i class="fas fa-user-times"></i>
+          </div>
+          <div>
+            <div style="font-weight:700; color:#991b1b; font-size:1.05rem">พ้นสภาพการเป็นพนักงาน (ลาออกแล้ว)</div>
+            <div style="font-size:0.85rem; color:#7f1d1d; margin-top:0.15rem">วันที่ลาออก: <strong>${formatDate(d['วันที่ลาออก'] || d.resignDate)}</strong> (ระบบระงับสิทธิ์เข้าใช้งานเรียบร้อยแล้ว)</div>
+          </div>
+        </div>
+        ${State.user.role === 'admin' ? `
+          <button class="btn btn-sm" onclick="window.confirmCancelResignation(${d.id})" style="background:#ffffff; color:#dc2626; border:1.5px solid #fca5a5; font-weight:700">
+            <i class="fas fa-undo"></i> คืนสภาพพนักงาน (ยกเลิกลาออก)
+          </button>
+        ` : ''}
+      </div>
+      ` : ''}
+
+      <!-- Profile Header -->
+      <div class="profile-header">
+        <div id="profilePhotoWrap">
+          ${photoHtml}
+        </div>
+        <div style="flex:1">
+          <div class="profile-name">
+            ${d.name}
+            ${d['วันที่ลาออก'] ? `<span class="badge" style="background:#fee2e2;color:#dc2626;font-size:0.75rem;margin-left:0.5rem">พ้นสภาพ</span>` : ''}
+          </div>
+          <div class="profile-pos"><i class="fas fa-briefcase"></i> ${d.position||'-'}</div>
+          <div class="profile-dept"><i class="fas fa-building"></i> ${d.dept||'-'} | ${d.empType||'-'} | กลุ่ม: ${d.group||'-'}</div>
+        </div>
+        <div class="profile-actions">
+          ${canEdit ? `
+          <label class="btn btn-accent btn-sm" style="cursor:pointer">
+            <i class="fas fa-camera"></i>เปลี่ยนรูป
+            <input type="file" accept="image/png, image/jpeg, image/webp" class="hidden" onchange="window.uploadPhoto(event,${d.id})">
+          </label>
+          <button class="btn btn-outline btn-sm" onclick="window.openEditStaff(${d.id})">
+            <i class="fas fa-edit"></i>แก้ไข
+          </button>
+          ` : ''}
+          <button class="btn btn-primary btn-sm" onclick="window.printProfile(${d.id})">
+            <i class="fas fa-print"></i>พิมพ์
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" onclick="window.switchTab('tabInfo',this)">ข้อมูลส่วนตัว</button>
+        ${d.nurseData ? '<button class="tab-btn" data-tab="tabLicense" onclick="window.switchTab(this.dataset.tab,this)">ใบประกอบวิชาชีพ</button>' : ''}
+        <button class="tab-btn" onclick="window.switchTab('tabTraining',this)">การอบรม/สมรรถนะ</button>
+        <button class="tab-btn" onclick="window.switchTab('tabDocs',this)">เอกสาร</button>
+      </div>
+
+      <!-- Tab: Info -->
+      <div class="tab-content active" id="tabInfo">
+        <div class="profile-grid">
+          <div class="card">
+            <div class="card-header"><div class="card-title"><i class="fas fa-user"></i>ข้อมูลส่วนตัว</div></div>
+            <div class="info-row"><span class="info-label">ชื่อ-สกุล</span><span class="info-value bold">${d.name}</span></div>
+            <div class="info-row"><span class="info-label">ชื่อเล่น</span><span class="info-value">${d.nickname||'-'}</span></div>
+            <div class="info-row"><span class="info-label">เลขบัตรประชาชน</span><span class="info-value">${d.idCard||'-'}</span></div>
+            <div class="info-row"><span class="info-label">สถานะภาพ</span><span class="info-value">${d.maritalStatus||'-'}</span></div>
+            <div class="info-row"><span class="info-label">วันเกิด</span><span class="info-value">${formatDate(d.dob)} (อายุ ${d.age} ปี)</span></div>
+            <div class="info-row"><span class="info-label">เบอร์โทร</span><span class="info-value">${d.phone||'-'}</span></div>
+            <div class="info-row"><span class="info-label">ที่อยู่</span><span class="info-value">${d.address||'-'}</span></div>
+            <div class="info-row"><span class="info-label">สุขภาพ</span><span class="info-value">${d.health||'-'}</span></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title"><i class="fas fa-briefcase"></i>ข้อมูลการทำงาน</div></div>
+            <div class="info-row"><span class="info-label">ตำแหน่ง</span><span class="info-value bold">${d.position||'-'}</span></div>
+            <div class="info-row"><span class="info-label">ประเภทตำแหน่ง</span><span class="info-value">${d.empType||'-'}</span></div>
+            <div class="info-row"><span class="info-label">หน่วยงาน</span><span class="info-value">${d.dept||'-'}</span></div>
+            <div class="info-row"><span class="info-label">กลุ่ม</span><span class="info-value">${d.group||'-'}</span></div>
+            <div class="info-row"><span class="info-label">วันเริ่มทำงาน (รายวัน)</span><span class="info-value">${formatDate(d.startDaily)||'-'}</span></div>
+            <div class="info-row"><span class="info-label">วันเริ่มทำงาน (รายเดือน)</span><span class="info-value">${formatDate(d.startMonthly)||'-'}</span></div>
+            <div class="info-row"><span class="info-label">อายุงาน</span><span class="info-value bold">${d.workDuration||'-'}</span></div>
+            <div class="info-row"><span class="info-label">วันบรรจุข้าราชการ</span><span class="info-value">${formatDate(d.nurseData ? d.nurseData.appointDate : '')||'-'}</span></div>
+            <div class="info-row"><span class="info-label">อายุราชการ</span><span class="info-value bold">${d.nurseData && d.nurseData.govWorkDuration ? d.nurseData.govWorkDuration : '-'}</span></div>
+            <div class="info-row"><span class="info-label">ปีที่เกษียณ</span><span class="info-value">${d.dob ? (new Date(d.dob).getFullYear() + 60 + 543) : '-'}</span></div>
+            <div class="info-row"><span class="info-label">วุฒิการศึกษา</span><span class="info-value">${d.education||'-'}</span></div>
+            <div class="info-row"><span class="info-label">สาขา</span><span class="info-value">${d.major||'-'}</span></div>
+            <div class="info-row"><span class="info-label">สถาบัน</span><span class="info-value">${d.university||'-'}</span></div>
+            <div class="info-row"><span class="info-label">การศึกษาต่อเนื่อง</span><span class="info-value">${d.contEdu||'-'}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: License -->
+      ${d.nurseData ? `
+      <div class="tab-content" id="tabLicense">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-id-card"></i>ข้อมูลใบประกอบวิชาชีพ</div>
+            ${(State.user.role === 'admin' || State.user.role === 'high') ? `<button class="btn btn-primary btn-sm" onclick="window.openEditNurse(${d.id})"><i class="fas fa-edit"></i>แก้ไข</button>` : ''}
+          </div>
+          <div class="profile-grid">
+            <div>
+              <div class="info-row"><span class="info-label">เลขที่ใบประกอบ</span><span class="info-value bold">${d.nurseData.licenseNo||'-'}</span></div>
+              <div class="info-row"><span class="info-label">วันที่ออกใบประกอบ</span><span class="info-value">${formatDate(d.nurseData.licenseIssue)}</span></div>
+              <div class="info-row"><span class="info-label">วันหมดอายุ</span><span class="info-value"><strong>${formatDate(d.nurseData.licenseExpiry)}</strong></span></div>
+              <div class="info-row"><span class="info-label">สถานะ</span><span class="info-value ${licStatusClass}">${licStatusText}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>` : ''}
+
+      <!-- Tab: Training -->
+      <div class="tab-content" id="tabTraining">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-graduation-cap"></i>ประวัติการอบรม/สมรรถนะ</div>
+            ${(State.user.role === 'admin' || State.user.role === 'high') ? `
+            <button class="btn btn-primary btn-sm" onclick="window.openAddTraining(${d.id},'${d.name}')">
+              <i class="fas fa-plus"></i>บันทึกการอบรม
+            </button>
+            ` : ''}
+          </div>
+          <div id="trainingListProfile">
+            ${renderTrainingTable(d.training || [], d.id)}
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Documents -->
+      <div class="tab-content" id="tabDocs">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><i class="fas fa-folder-open"></i>เอกสารแนบ</div>
+          </div>
+          ${(State.user.role === 'admin' || State.user.role === 'high' || String(State.user.staffId) === String(d.id)) ? `
+          <div class="form-group" style="margin-bottom:1rem">
+            <select id="docTypeSelect" class="filter-select">
+              ${['ใบประกอบวิชาชีพ','สำเนาบัตรประชาชน','วุฒิการศึกษา','สัญญาจ้าง','หนังสือสั่งการ','เกียรติบัตร','อื่นๆ'].map(t=>`<option>${t}</option>`).join('')}
+            </select>
+          </div>
+          <label class="upload-zone" id="dropZone_${d.id}">
+            <input type="file" class="hidden" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              onchange="window.uploadDocument(event,${d.id},'${d.name}')">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <p>คลิกหรือลากไฟล์มาวางที่นี่</p>
+            <p><strong>รองรับ:</strong> PDF, JPG, PNG, Word</p>
+          </label>
+          ` : ''}
+          <div id="docList_${d.id}" style="margin-top:1rem">
+            ${renderDocList(d.documents || [], d.id)}
+          </div>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    c.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation"></i><p>${e.message}</p></div>`;
+  }
+}
+
+function switchTab(tabId, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  const tabEl = document.getElementById(tabId); if (tabEl) tabEl.classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+function renderTrainingTable(training, staffId) {
+  if (!training.length) return '<div class="empty-state"><i class="fas fa-graduation-cap"></i><p>ยังไม่มีประวัติการอบรม</p></div>';
+  const canEditTraining = State.user.role === 'admin' || State.user.role === 'high';
+  const canAttachCert = canEditTraining || String(State.user.staffId) === String(staffId);
+  const manageHeader = canEditTraining ? '<th>จัดการ</th>' : '';
+  return `
+  <div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>หลักสูตร</th><th>ประเภท</th><th>วันที่</th><th>วัน</th><th>สถาบัน</th><th>ปีงบ</th><th>เกียรติบัตร</th>${manageHeader}</tr></thead>
+    <tbody>
+      ${training.map((t,i)=>`
+        <tr>
+          <td>${i+1}</td>
+          <td><strong>${t.course}</strong></td>
+          <td><span class="badge badge-${t.type==='สมรรถนะ'?'green':'blue'}">${t.type}</span></td>
+          <td class="text-sm">${formatDate(t.startDate)}${t.endDate?' — '+formatDate(t.endDate):''}</td>
+          <td>${t.days||'-'}</td>
+          <td class="text-sm">${t.institution||'-'}</td>
+          <td>${t.year||'-'}</td>
+          <td>${t.certId
+            ? `<a href="https:\/\/drive.google.com/file/d/${t.certId}/view" target="_blank" class="btn btn-outline btn-sm"><i class="fas fa-certificate"></i>ดู</a>`
+            : canAttachCert
+              ? `<label class="btn btn-outline btn-sm" style="cursor:pointer"><i class="fas fa-upload"></i>แนบ<input type="file" class="hidden" accept=".pdf,.jpg,.png" onchange="window.uploadCertificate(event,${staffId},${t.id})"></label>`
+              : '-'
+          }</td>
+          ${canEditTraining ? `<td>
+            <button class="btn-icon-sm btn-del" onclick="window.deleteTraining(${t.id},${staffId})" title="ลบ"><i class="fas fa-trash"></i></button>
+          </td>` : ''}
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`;
+}
+
+function renderDocList(docs, staffId) {
+  if (!docs.length) return '<p class="text-center text-muted" style="padding:1rem">ยังไม่มีเอกสาร</p>';
+  const icons = {'ใบประกอบวิชาชีพ':'fa-id-card','สำเนาบัตรประชาชน':'fa-id-badge','วุฒิการศึกษา':'fa-graduation-cap','เกียรติบัตร':'fa-award','default':'fa-file-alt'};
+  const canDeleteDoc = State.user.role === 'admin' || State.user.role === 'high';
+  return docs.map(doc => `
+    <div class="doc-item">
+      <div class="doc-icon"><i class="fas ${icons[doc.type]||icons.default}"></i></div>
+      <div class="doc-info">
+        <div class="doc-name">${doc.name}</div>
+        <div class="doc-meta">${doc.type} | ${formatDate((doc.uploaded ? doc.uploaded.substring(0,10) : ''))} | โดย ${doc.by}</div>
+      </div>
+      <div class="doc-actions">
+        <a href="${doc.fileUrl}" target="_blank" class="btn-icon-sm btn-view" title="เปิด"><i class="fas fa-external-link-alt"></i></a>
+        ${canDeleteDoc ? `<button class="btn-icon-sm btn-del" onclick="window.deleteDocument('${doc.fileId}',${doc.id},${staffId})" title="ลบ"><i class="fas fa-trash"></i></button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+// ── File Operations ───────────────────────────────
+
+async function uploadPhoto(e, staffId) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { showToast('ไฟล์ใหญ่เกิน 5MB', 'error'); return; }
+  showToast('กำลังอัปโหลดรูป...', 'info');
+  try {
+    const base64 = await fileToBase64(file);
+    const res = await api('uploadPhoto', { staffId, base64, mimeType: file.type, fileName: file.name });
+    showToast('อัปโหลดรูปสำเร็จ', 'success');
+    // Refresh profile
+    viewProfile(staffId);
+  } catch(err) { showToast(err.message, 'error') }
+}
+
+async function uploadDocument(e, staffId, staffName) {
+  const files = Array.from(e.target.files);
+  const docType = (document.getElementById('docTypeSelect') ? document.getElementById('docTypeSelect').value : 'อื่นๆ');
+  for (const file of files) {
+    if (file.size > 10 * 1024 * 1024) { showToast('ไฟล์ ' + file.name + ' ใหญ่เกิน 10MB', 'error'); continue; }
+    showToast('กำลังอัปโหลด ' + file.name, 'info');
+    try {
+      const base64 = await fileToBase64(file);
+      await api('uploadDocument', { staffId, base64, mimeType: file.type, fileName: file.name, docType });
+      showToast('อัปโหลด ' + file.name + ' สำเร็จ', 'success');
+    } catch(err) { showToast(err.message, 'error') }
+  }
+  viewProfile(staffId);
+}
+
+async function uploadCertificate(e, staffId, trainingId) {
+  const file = e.target.files[0];
+  if (!file) return;
+  showToast('กำลังอัปโหลดเกียรติบัตร...', 'info');
+  try {
+    const base64 = await fileToBase64(file);
+    await api('uploadCertificate', { staffId, trainingId, base64, mimeType: file.type, fileName: file.name });
+    showToast('อัปโหลดเกียรติบัตรสำเร็จ', 'success');
+    viewProfile(staffId);
+  } catch(err) { showToast(err.message, 'error') }
+}
+
+async function deleteDocument(fileId, docId, staffId) {
+  confirmAction('ลบเอกสาร', 'ยืนยันการลบเอกสารนี้?', async () => {
+    try {
+      await api('deleteDocument', { fileId, docId });
+      showToast('ลบเอกสารสำเร็จ', 'success');
+      viewProfile(staffId);
+    } catch(e) { showToast(e.message, 'error') }
+  });
+}
+
+// ── Utility: File → Base64 ────────────────────────
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── Training Modal ────────────────────────────────
+
+async function openAddTraining(staffId, staffName) {
+  document.getElementById('trainingModalTitle').textContent = 'บันทึกการอบรม — ' + staffName;
+  let courses = [];
+  try { courses = State.courseList.length ? State.courseList : await api('getCourseList'); State.courseList = courses; } catch(e) {}
+
+  document.getElementById('trainingModalBody').innerHTML = `
+  <form onsubmit="window.saveTraining(event,${staffId})">
+    <div class="form-group">
+      <label>หลักสูตร *</label>
+      <input name="course" list="courseList" required placeholder="ชื่อหลักสูตร">
+      <datalist id="courseList">${courses.map(c=>`<option value="${c.name}">`).join('')}</datalist>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>ประเภท</label>
+        <select name="type"><option>อบรม</option><option>สมรรถนะ</option></select>
+      </div>
+      <div class="form-group"><label>ปีงบประมาณ</label>
+        <input name="year" type="number" placeholder="${new Date().getFullYear()+543}">
+      </div>
+      <div class="form-group"><label>ตั้งแต่วันที่</label><input type="date" name="startDate"></div>
+      <div class="form-group"><label>ถึงวันที่</label><input type="date" name="endDate"></div>
+      <div class="form-group"><label>จำนวนวัน</label><input name="days" type="number" min="0"></div>
+      <div class="form-group"><label>สถาบัน</label><input name="institution"></div>
+    </div>
+    <div class="form-group"><label>หมายเหตุ</label><input name="note"></div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-outline" onclick="window.closeModal('trainingModal')">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i>บันทึก</button>
+    </div>
+  </form>`;
+  openModal('trainingModal');
+}
+
+async function saveTraining(e, staffId) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd.entries());
+  data.staffId = staffId;
+  try {
+    await api('addTraining', { data });
+    showToast('บันทึกการอบรมสำเร็จ', 'success');
+    closeModal('trainingModal');
+    viewProfile(staffId);
+  } catch(err) { showToast(err.message, 'error') }
+}
+
+async function deleteTraining(id, staffId) {
+  confirmAction('ลบการอบรม', 'ยืนยันการลบรายการอบรมนี้?', async () => {
+    try {
+      await api('deleteTraining', { id });
+      showToast('ลบสำเร็จ', 'success');
+      viewProfile(staffId);
+    } catch(e) { showToast(e.message, 'error') }
+  });
+}
+
+function openEditNurse(staffId) {
+  openEditStaff(staffId);
+}
+
+// ══════════════════════════════════════════════════
+// TRAINING PAGE (all staff)
+// ══════════════════════════════════════════════════
+async function renderTraining() {
+  const [allTraining, courses] = await Promise.all([
+    api('getAllTraining', { filters:{} }),
+    api('getCourseList'),
+  ]);
+  State.courseList = courses;
+  const c = document.getElementById('pageContainer');
+
+  const years  = allTraining.map(function(t) { return t.year; }).filter(Boolean).filter(function(v, i, a) { return a.indexOf(v) === i; }).sort(function(a,b){return b-a;});
+  const types  = ['อบรม','สมรรถนะ'];
+  const curYear = new Date().getFullYear() + 543;
+
+  c.innerHTML = `
+    <div class="filters-bar">
+      <select class="filter-select" id="tFilterYear" onchange="window.filterTrainingPage()">
+        <option value="">ทุกปีงบประมาณ</option>
+        ${years.map(y=>`<option value="${y}" ${y==curYear?'selected':''}>${y}</option>`).join('')}
+      </select>
+      <select class="filter-select" id="tFilterType" onchange="window.filterTrainingPage()">
+        <option value="">ทุกประเภท</option>
+        ${types.map(t=>`<option>${t}</option>`).join('')}
+      </select>
+      <div class="search-box" style="flex:1">
+        <i class="fas fa-search"></i>
+        <input type="text" id="tSearch" placeholder="ค้นหาชื่อ หลักสูตร..." oninput="filterTrainingPage()">
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-graduation-cap"></i>รายการอบรม/สมรรถนะทั้งหมด</div>
+        <span class="badge badge-green" id="tCount">${allTraining.length} รายการ</span>
+      </div>
+      <div class="table-wrap" id="trainingTableWrap">
+        ${renderAllTrainingTable(allTraining)}
+      </div>
+    </div>
+  `;
+  window._allTraining = allTraining;
+}
+
+function filterTrainingPage() {
+  const year   = (document.getElementById('tFilterYear') ? document.getElementById('tFilterYear').value : '');
+  const type   = (document.getElementById('tFilterType') ? document.getElementById('tFilterType').value : '');
+  const search = (document.getElementById('tSearch') && document.getElementById('tSearch').value ? document.getElementById('tSearch').value.toLowerCase() : '');
+  let data = window._allTraining || [];
+  if (year) data = data.filter(t => String(t.year) === String(year));
+  if (type) data = data.filter(t => t.type === type);
+  if (search) data = data.filter(t =>
+    (t.name ? t.name.toLowerCase().includes(search) : false) ||
+    (t.course ? t.course.toLowerCase().includes(search) : false)
+  );
+  document.getElementById('trainingTableWrap').innerHTML = renderAllTrainingTable(data);
+  document.getElementById('tCount').textContent = data.length + ' รายการ';
+}
+
+function renderAllTrainingTable(data) {
+  if (!data.length) return '<div class="empty-state"><i class="fas fa-graduation-cap"></i><p>ไม่พบข้อมูล</p></div>';
+  return `<table>
+    <thead><tr><th>#</th><th>ชื่อ-สกุล</th><th>หลักสูตร</th><th>ประเภท</th><th>วันที่</th><th>วัน</th><th>สถาบัน</th><th>ปีงบ</th><th>เกียรติบัตร</th></tr></thead>
+    <tbody>${data.map((t,i)=>`
+      <tr>
+        <td>${i+1}</td>
+        <td><a href="#" onclick="window.viewProfile(${t.staffId})" style="color:var(--primary);font-weight:600">${t.name}</a></td>
+        <td>${t.course}</td>
+        <td><span class="badge badge-${t.type==='สมรรถนะ'?'green':'blue'}">${t.type}</span></td>
+        <td class="text-sm">${formatDate(t.startDate)}</td>
+        <td>${t.days||'-'}</td>
+        <td class="text-sm">${t.institution||'-'}</td>
+        <td>${t.year||'-'}</td>
+        <td>${t.certId?`<a href="https:\/\/drive.google.com/file/d/${t.certId}/view" target="_blank" class="btn btn-outline btn-sm"><i class="fas fa-certificate"></i></a>`:'-'}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+}
+
+// ══════════════════════════════════════════════════
+// COURSES
+// ══════════════════════════════════════════════════
+async function renderCourses() {
+  const courses = await api('getCourseList');
+  State.courseList = courses;
+  const c = document.getElementById('pageContainer');
+  c.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-book-open"></i>ทะเบียนหลักสูตรทั้งหมด</div>
+        <button class="btn btn-primary" onclick="window.openAddCourse()"><i class="fas fa-plus"></i>เพิ่มหลักสูตร</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>ชื่อหลักสูตร</th><th>ประเภท</th><th>สถาบัน</th><th>ปีงบ</th><th>วันที่</th><th>รวม(วัน)</th><th>จัดการ</th></tr></thead>
+          <tbody>
+            ${courses.map((c2,i)=>`
+              <tr>
+                <td>${i+1}</td>
+                <td><strong>${c2.name}</strong></td>
+                <td><span class="badge badge-${c2.type==='สมรรถนะ'?'green':'blue'}">${c2.type}</span></td>
+                <td>${c2.institution||'-'}</td>
+                <td>${c2.year||'-'}</td>
+                <td class="text-sm">${formatDate(c2.startDate)||'-'}</td>
+                <td>${c2.days||'-'}</td>
+                <td>
+                  <button class="btn-icon-sm btn-edit" onclick="window.openEditCourse(${c2.id})"><i class="fas fa-edit"></i></button>
+                  <button class="btn-icon-sm btn-del"  onclick="window.deleteCourse(${c2.id},'${c2.name}')"><i class="fas fa-trash"></i></button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function openAddCourse(data={}, id=null) {
+  document.getElementById('trainingModalTitle').textContent = id ? 'แก้ไขหลักสูตร' : 'เพิ่มหลักสูตร';
+  document.getElementById('trainingModalBody').innerHTML = `
+  <form onsubmit="window.saveCourse(event,${id})">
+    <div class="form-group"><label>ชื่อหลักสูตร *</label><input name="name" value="${data.name||''}" required></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>ประเภท</label>
+        <select name="type"><option ${data.type==='อบรม'?'selected':''}>อบรม</option><option ${data.type==='สมรรถนะ'?'selected':''}>สมรรถนะ</option></select>
+      </div>
+      <div class="form-group"><label>ปีงบประมาณ</label><input name="year" type="number" value="${data.year||''}"></div>
+      <div class="form-group"><label>วันเริ่ม</label><input type="date" name="startDate" value="${data.startDate||''}"></div>
+      <div class="form-group"><label>วันสิ้นสุด</label><input type="date" name="endDate" value="${data.endDate||''}"></div>
+      <div class="form-group"><label>จำนวนวัน</label><input name="days" type="number" value="${data.days||''}"></div>
+      <div class="form-group"><label>สถาบัน</label><input name="institution" value="${data.institution||''}"></div>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-outline" onclick="window.closeModal('trainingModal')">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i>บันทึก</button>
+    </div>
+  </form>`;
+  openModal('trainingModal');
+}
+
+async function openEditCourse(id) {
+  const courses = await api('getCourseList');
+  const course  = courses.find(c => c.id == id);
+  if (!course) return;
+  openAddCourse(course, id);
+}
+
+async function saveCourse(e, id) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    if (id) { await api('updateCourse', { id, data }); showToast('แก้ไขสำเร็จ','success'); }
+    else     { await api('addCourse',    { data });     showToast('เพิ่มสำเร็จ','success'); }
+    closeModal('trainingModal');
+    renderCourses();
+  } catch(err) { showToast(err.message, 'error') }
+}
+
+async function deleteCourse(id, name) {
+  confirmAction('ลบหลักสูตร', `ยืนยันการลบ "${name}"?`, async () => {
+    try { await api('deleteCourse', { id }); showToast('ลบสำเร็จ','success'); renderCourses(); }
+    catch(e) { showToast(e.message, 'error') }
+  });
+}
+
+// ══════════════════════════════════════════════════
+// REPORTS
+// ══════════════════════════════════════════════════
+async function renderReports() {
+  const c = document.getElementById('pageContainer');
+  c.innerHTML = `
+    <div class="tabs">
+      <button class="tab-btn active" onclick="window.switchTab('repLicense',this)">ใบประกอบวิชาชีพ</button>
+      <button class="tab-btn" onclick="window.switchTab('repTraining',this)">การอบรมประจำปี</button>
+    </div>
+    <div class="tab-content active" id="repLicense">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-id-card"></i>รายงานใบประกอบวิชาชีพ</div>
+          <button class="btn btn-outline btn-sm" onclick="window.printEl('licenseReportTable')"><i class="fas fa-print"></i>พิมพ์</button>
+        </div>
+        <div id="licenseReportTable"><div className="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+    <div class="tab-content" id="repTraining">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><i class="fas fa-graduation-cap"></i>รายงานการอบรมประจำปีงบประมาณ</div>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <select class="filter-select" id="repYear" onchange="window.loadTrainingReport()">
+              ${Array.from({length:5},(_,i)=>{const y=new Date().getFullYear()+543-i;return`<option value="${y}">${y}</option>`}).join('')}
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="window.printEl('trainingReportTable')"><i class="fas fa-print"></i>พิมพ์</button>
+          </div>
+        </div>
+        <div id="trainingReportTable"><div className="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+  `;
+  loadLicenseReport();
+  loadTrainingReport();
+}
+
+async function loadLicenseReport() {
+  try {
+    const data = await api('getLicenseReport');
+    const sorted = data.sort((a,b) => (a.daysLeft||999) - (b.daysLeft||999));
+    document.getElementById('licenseReportTable').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>ชื่อ-สกุล</th><th>หน่วยงาน</th><th>ตำแหน่ง</th><th>เลขที่ใบประกอบ</th><th>วันหมดอายุ</th><th>สถานะ</th></tr></thead>
+        <tbody>${sorted.map((r,i)=>`
+          <tr>
+            <td>${i+1}</td>
+            <td><a href="#" onclick="window.viewProfile(${r.staffId})" style="color:var(--primary);font-weight:600">${r.name}</a></td>
+            <td>${r.dept||'-'}</td>
+            <td>${r.position||'-'}</td>
+            <td>${r.licenseNo||'-'}</td>
+            <td>${formatDate(r.expiryDate)||'-'}</td>
+            <td><span class="badge badge-${r.status==='ok'?'green':r.status==='warning'?'orange':'red'}">
+              ${r.status==='ok'?'ปกติ':r.status==='warning'?'ใกล้หมด':r.status==='critical'?'วิกฤต':'หมดอายุ'}
+            </span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  } catch(e) { document.getElementById('licenseReportTable').innerHTML = `<p class="text-center text-muted">${e.message}</p>`; }
+}
+
+async function loadTrainingReport() {
+  const year = (document.getElementById('repYear') ? document.getElementById('repYear').value : '');
+  try {
+    const data = await api('getTrainingReport', { year });
+    document.getElementById('trainingReportTable').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>ชื่อ-สกุล</th><th>จำนวนหลักสูตร</th><th>รายการอบรม</th></tr></thead>
+        <tbody>${data.map((r,i)=>`
+          <tr>
+            <td>${i+1}</td>
+            <td><a href="#" onclick="window.viewProfile(${r.staffId})" style="color:var(--primary);font-weight:600">${r.name}</a></td>
+            <td><span class="badge badge-green">${r.trainings.length} หลักสูตร</span></td>
+            <td class="text-sm">${r.trainings.map(t=>`${t.course} (${t.type})`).join(', ')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  } catch(e) { document.getElementById('trainingReportTable').innerHTML = `<p class="text-center text-muted">${e.message}</p>`; }
+}
+
+// ──════════════════════════════════════════════════
+// USERS MANAGEMENT
+// ──════════════════════════════════════════════════
+async function renderUsers(isQuiet = false) {
+  if (State.user.role !== 'admin') {
+    document.getElementById('pageContainer').innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><p>เฉพาะ admin เท่านั้น</p></div>';
+    return;
+  }
+
+  const c = document.getElementById('pageContainer');
+  const searchVal = document.getElementById('userSearch') ? document.getElementById('userSearch').value : '';
+
+  if (!isQuiet) {
+    c.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin fa-2x"></i><p>กำลังโหลด...</p></div>';
+  }
+
+  let staffList = [];
+  try { staffList = await api('getStaffWithRoles'); } catch(e) { showToast(e.message,'error'); return; }
+
+  const roleBadge = r => {
+    const map = {
+      admin:  ['#dc2626','👑 ผู้ดูแลระบบ (Admin)'],
+      high:   ['#7c3aed','⬆ หัวหน้ากลุ่มงาน'],
+      medium: ['#0369a1','◼ หัวหน้างาน'],
+      low:    ['#15803d','👤 สมาชิก'],
+      none:   ['#94a3b8','— ไม่มีบัญชี'],
+    };
+    const [color, label] = map[r] || map.none;
+    return `<span style="display:inline-block;padding:0.2rem 0.6rem;border-radius:20px;font-size:0.75rem;font-weight:700;background:${color}18;color:${color};border:1px solid ${color}40">${label}</span>`;
+  };
+
+  const roleOpts = (current) => {
+    const activeRole = (current && current !== 'none') ? current : 'low';
+    return ['low','medium','high','admin'].map(r =>
+      `<option value="${r}" ${r===activeRole?'selected':''}>${{admin:'👑 ผู้ดูแลระบบ (Admin)',high:'⬆ หัวหน้ากลุ่มงาน',medium:'◼ หัวหน้างาน',low:'👤 สมาชิก'}[r]}</option>`
+    ).join('');
+  };
+
+  // Fetch Menu Permissions
+  let menuPerms = State.menuPermissions;
+  if (!menuPerms || !menuPerms.length) {
+    try {
+      menuPerms = await api('getMenuPermissions');
+      State.menuPermissions = menuPerms;
+    } catch(e) {
+      console.error('Menu permissions load error:', e);
+      menuPerms = [];
+    }
+  }
+
+  c.innerHTML = `
+    <!-- Card 1: User Role Management -->
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header" style="flex-wrap:wrap;gap:0.75rem">
+        <div class="card-title"><i class="fas fa-user-shield"></i> จัดการสิทธิ์ผู้ใช้งาน (รายบุคคล)</div>
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+          <input id="userSearch" type="text" placeholder="🔍 ค้นหาชื่อ / ตำแหน่ง / หน่วยงาน..." onkeyup="window.filterUserTable(this.value)"
+            style="border:1.5px solid #e2e8f0;border-radius:8px;padding:0.45rem 0.75rem;font-size:0.85rem;outline:none;min-width:240px">
+          <button class="btn btn-primary" onclick="window.openAddUser()"><i class="fas fa-plus"></i> เพิ่มผู้ใช้</button>
+          <button class="btn" onclick="window.createAccountsForAllStaff(this)" style="background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:8px;padding:0.45rem 0.85rem;font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:0.35rem;box-shadow:0 2px 6px rgba(16,185,129,0.25);cursor:pointer">
+            <i class="fas fa-magic"></i> สร้างบัญชีให้พนักงานทุกคนที่ยังไม่มี
+          </button>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="padding:0.5rem 1rem;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:0.8rem;color:#64748b;display:flex;gap:1.25rem;flex-wrap:wrap">
+        <span>สิทธิ์: </span>
+        <span>👑 <strong>ผู้ดูแลระบบ (Admin)</strong> — แก้ไขได้ทุกอย่าง</span>
+        <span>⬆ <strong>หัวหน้ากลุ่มงาน</strong> — แก้ไขข้อมูลพนักงาน, อัปโหลด</span>
+        <span>◼ <strong>หัวหน้างาน</strong> — ดูเฉพาะในแผนก</span>
+        <span>👤 <strong>สมาชิก</strong> — ดูเฉพาะตัวเอง</span>
+      </div>
+
+      <div class="table-wrap">
+        <table id="userTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>ชื่อ-สกุล</th>
+              <th>ตำแหน่ง</th>
+              <th>หน่วยงาน</th>
+              <th>Username</th>
+              <th>สิทธิ์ปัจจุบัน</th>
+              <th>เลือกสิทธิ์ใหม่</th>
+              <th>สถานะบัญชี</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${staffList.map((s,i) => `
+              <tr data-search="${(s.name+s.position+s.dept).toLowerCase()}">
+                <td>${i+1}</td>
+                <td><strong>${s.name||'-'}</strong></td>
+                <td style="font-size:0.82rem;color:#64748b">${s.position||'-'}</td>
+                <td><span style="font-size:0.8rem;background:#eff6ff;color:#1d4ed8;padding:0.15rem 0.5rem;border-radius:20px">${s.dept||'-'}</span></td>
+                <td style="font-size:0.8rem;font-family:monospace;color:#475569">${s.idCard||'-'}</td>
+                <td>${roleBadge(s.role)}</td>
+                <td>
+                  <div style="display:flex;gap:0.4rem;align-items:center">
+                    <select id="roleSelect_${s.staffId}" style="border:1.5px solid #e2e8f0;border-radius:8px;padding:0.35rem 0.5rem;font-size:0.8rem;outline:none;background:#ffffff;cursor:pointer">
+                      ${roleOpts(s.role)}
+                    </select>
+                    <button onclick="window.applyUserRole(${s.staffId}, this)" title="บันทึกการเปลี่ยนสิทธิ์"
+                      style="background:linear-gradient(135deg,#1d4ed8,#2563eb);color:white;border:none;border-radius:8px;padding:0.35rem 0.75rem;cursor:pointer;font-size:0.8rem;font-weight:600;display:flex;align-items:center;gap:0.3rem;box-shadow:0 2px 6px rgba(29,78,216,0.25)">
+                      <i class="fas fa-save"></i> บันทึก
+                    </button>
+                  </div>
+                </td>
+                <td>
+                  ${s.hasAccount
+                    ? `<span style="color:#15803d;font-size:0.8rem"><i class="fas fa-check-circle"></i> มีบัญชี</span>`
+                    : `<span style="color:#94a3b8;font-size:0.8rem"><i class="fas fa-times-circle"></i> ยังไม่มี</span>`}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:0.6rem 1rem;font-size:0.8rem;color:#94a3b8;background:#f8fafc;border-top:1px solid #e2e8f0">
+        พนักงานทั้งหมด ${staffList.length} คน | มีบัญชี ${staffList.filter(s=>s.hasAccount).length} คน
+      </div>
+    </div>
+
+    <!-- Card 2: Menu Access Permissions Matrix -->
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header" style="background:#eff6ff; border-bottom: 1px solid #dbeafe;">
+        <div class="card-title" style="color:#1d4ed8"><i class="fas fa-sliders-h"></i> จัดการสิทธิ์การมองเห็นเมนูด้านข้าง (สิทธิ์เมนู)</div>
+        <button class="btn btn-primary btn-sm" onclick="window.saveMenuPermissions(this)" style="background:linear-gradient(135deg,#1d4ed8,#2563eb)">
+          <i class="fas fa-save"></i> บันทึกสิทธิ์เมนูลง Google Sheet
+        </button>
+      </div>
+      <div style="padding:0.65rem 1.25rem; background:#f8fafc; font-size:0.82rem; color:#475569; border-bottom:1px solid #e2e8f0;">
+        📌 กำหนดว่าผู้ใช้งานแต่ละระดับสิทธิ์ (Admin, หัวหน้ากลุ่มงาน, หัวหน้างาน, สมาชิก) สามารถมองเห็นเมนูใดในแถบด้านข้างได้บ้าง (ข้อมูลบันทึกในชีท <strong>'สิทธิ์เมนู'</strong> อัตโนมัติ)
+      </div>
+      <div class="table-wrap">
+        <table id="menuPermissionTable">
+          <thead>
+            <tr style="background:#f1f5f9">
+              <th>หมวดหมู่</th>
+              <th>เมนู</th>
+              <th class="text-center" style="color:#1d4ed8;width:130px">👑 Admin</th>
+              <th class="text-center" style="color:#7c3aed;width:140px">⬆ หัวหน้ากลุ่มงาน</th>
+              <th class="text-center" style="color:#0369a1;width:130px">◼ หัวหน้างาน</th>
+              <th class="text-center" style="color:#15803d;width:110px">👤 สมาชิก</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${menuPerms.map(m => `
+              <tr data-menuid="${m.menuId}" data-menuname="${m.menuName}" data-category="${m.category}">
+                <td><span class="badge" style="background:#f1f5f9;color:#475569;font-size:0.75rem;padding:0.2rem 0.6rem;border-radius:12px">${m.category}</span></td>
+                <td><strong>${m.menuName}</strong></td>
+                <td class="text-center"><input type="checkbox" class="perm-admin" ${m.admin ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:#1d4ed8"></td>
+                <td class="text-center"><input type="checkbox" class="perm-high" ${m.high ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:#7c3aed"></td>
+                <td class="text-center"><input type="checkbox" class="perm-medium" ${m.medium ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:#0369a1"></td>
+                <td class="text-center"><input type="checkbox" class="perm-low" ${m.low ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:#15803d"></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Card 3: Change Password -->
+    <div class="card">
+      <div class="card-header"><div class="card-title"><i class="fas fa-key"></i> เปลี่ยนรหัสผ่านของฉัน</div></div>
+      <form onsubmit="window.changeMyPassword(event)" style="max-width:400px">
+        <div class="form-group"><label>รหัสผ่านเดิม</label><input type="password" name="oldPw" required></div>
+        <div class="form-group"><label>รหัสผ่านใหม่</label><input type="password" name="newPw" required minlength="6"></div>
+        <div class="form-group"><label>ยืนยันรหัสผ่านใหม่</label><input type="password" name="confirmPw" required></div>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> เปลี่ยนรหัสผ่าน</button>
+      </form>
+    </div>`;
+
+  if (searchVal) {
+    const searchInput = document.getElementById('userSearch');
+    if (searchInput) {
+      searchInput.value = searchVal;
+      filterUserTable(searchVal);
+    }
+  }
+}
+
+function filterUserTable(q) {
+  const rows = document.querySelectorAll('#userTable tbody tr');
+  const kw   = q.toLowerCase();
+  rows.forEach(r => r.style.display = (!kw || r.dataset.search.includes(kw)) ? '' : 'none');
+}
+window.filterUserTable = filterUserTable;
+
+async function applyUserRole(staffId, btn) {
+  const sel  = document.getElementById('roleSelect_' + staffId);
+  if (!sel) return;
+  const role = sel.value;
+
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> บันทึก...';
+  }
+
+  try {
+    const res = await api('setUserRole', { staffId, role });
+    showToast(res.message || 'บันทึกสิทธิ์สำเร็จ', 'success');
+    await renderUsers(true);
+  } catch(e) {
+    showToast(e.message || 'เกิดข้อผิดพลาดในการบันทึก', 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+}
+window.applyUserRole = applyUserRole;
+
+async function saveMenuPermissions(btn) {
+  const rows = document.querySelectorAll('#menuPermissionTable tbody tr');
+  const menuList = [];
+
+  rows.forEach(r => {
+    menuList.push({
+      menuId:   r.dataset.menuid,
+      menuName: r.dataset.menuname,
+      category: r.dataset.category,
+      admin:    r.querySelector('.perm-admin').checked,
+      high:     r.querySelector('.perm-high').checked,
+      medium:   r.querySelector('.perm-medium').checked,
+      low:      r.querySelector('.perm-low').checked,
+    });
+  });
+
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
+  }
+
+  try {
+    const res = await api('updateMenuPermissions', { menuList });
+    State.menuPermissions = menuList;
+    applyMenuPermissions(menuList);
+    showToast(res.message || 'บันทึกสิทธิ์การเห็นเมนูลง Google Sheet เรียบร้อยแล้ว', 'success');
+  } catch(e) {
+    showToast(e.message || 'เกิดข้อผิดพลาดในการบันทึกสิทธิ์เมนู', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+}
+window.saveMenuPermissions = saveMenuPermissions;
+
+async function createAccountsForAllStaff(btn) {
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังสร้างบัญชี...';
+  }
+
+  try {
+    const res = await api('createAccountsForAllStaff');
+    showToast(res.message || 'สร้างบัญชีให้พนักงานทุกคนเรียบร้อยแล้ว', 'success');
+    await renderUsers(true);
+  } catch(e) {
+    showToast(e.message || 'เกิดข้อผิดพลาดในการสร้างบัญชี', 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+}
+window.createAccountsForAllStaff = createAccountsForAllStaff;
+
+
+function openAddUser() {
+  document.getElementById('userModalTitle').textContent = 'เพิ่มผู้ใช้งาน';
+  document.getElementById('userModalBody').innerHTML = `
+  <form onsubmit="window.saveUser(event,null)">
+    <div class="form-group"><label>Username *</label><input name="username" required></div>
+    <div class="form-group"><label>รหัสผ่าน *</label><input type="password" name="password" required minlength="6"></div>
+    <div class="form-group"><label>ชื่อ-สกุล</label><input name="name"></div>
+    <div class="form-group"><label>อีเมล</label><input type="email" name="email"></div>
+    <div class="form-group"><label>Role</label>
+      <select name="role"><option value="user">user (ผู้ใช้งาน)</option><option value="admin">admin (ผู้ดูแล)</option></select>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-outline" onclick="window.closeModal('userModal')">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i>บันทึก</button>
+    </div>
+  </form>`;
+  openModal('userModal');
+}
+
+function openEditUser(id, username, role, name, email, status) {
+  document.getElementById('userModalTitle').textContent = 'แก้ไขผู้ใช้งาน — ' + username;
+  document.getElementById('userModalBody').innerHTML = `
+  <form onsubmit="window.saveUser(event,${id})">
+    <div class="form-group"><label>Username</label><input value="${username}" disabled class="text-muted"></div>
+    <div class="form-group"><label>รหัสผ่านใหม่ (เว้นว่างหากไม่เปลี่ยน)</label><input type="password" name="password" minlength="6"></div>
+    <div class="form-group"><label>ชื่อ-สกุล</label><input name="name" value="${name}"></div>
+    <div class="form-group"><label>อีเมล</label><input type="email" name="email" value="${email}"></div>
+    <div class="form-group"><label>Role</label>
+      <select name="role">
+        <option value="user" ${role==='user'?'selected':''}>user (ผู้ใช้งาน)</option>
+        <option value="admin" ${role==='admin'?'selected':''}>admin (ผู้ดูแล)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>สถานะ</label>
+      <select name="status">
+        <option value="active" ${status==='active'?'selected':''}>ใช้งาน</option>
+        <option value="inactive" ${status==='inactive'?'selected':''}>ระงับ</option>
+      </select>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-outline" onclick="window.closeModal('userModal')">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i>บันทึก</button>
+    </div>
+  </form>`;
+  openModal('userModal');
+}
+
+async function saveUser(e, id) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    if (id) { await api('updateUser', { id, data }); showToast('แก้ไขผู้ใช้สำเร็จ','success'); }
+    else     { await api('addUser',    { data });     showToast('เพิ่มผู้ใช้สำเร็จ','success'); }
+    closeModal('userModal');
+    renderUsers();
+  } catch(err) { showToast(err.message, 'error') }
+}
+
+async function deleteUser(id, username) {
+  confirmAction('ลบผู้ใช้งาน', `ยืนยันการลบ "${username}"?`, async () => {
+    try { await api('deleteUser', { id }); showToast('ลบสำเร็จ','success'); renderUsers(); }
+    catch(e) { showToast(e.message, 'error') }
+  });
+}
+
+async function changeMyPassword(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  if (fd.get('newPw') !== fd.get('confirmPw')) { showToast('รหัสผ่านใหม่ไม่ตรงกัน','error'); return; }
+  try {
+    await api('changePassword', { oldPassword: fd.get('oldPw'), newPassword: fd.get('newPw') });
+    showToast('เปลี่ยนรหัสผ่านสำเร็จ','success');
+    e.target.reset();
+  } catch(err) { showToast(err.message, 'error') }
+}
+
+// ══════════════════════════════════════════════════
+// IMPORT PAGE
+// ══════════════════════════════════════════════════
+function renderImport() {
+  const c = document.getElementById('pageContainer');
+  c.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-file-import"></i>นำเข้าข้อมูลจาก Excel</div>
+      </div>
+      <p class="text-muted" style="margin-bottom:1.5rem">
+        เลือกไฟล์ Excel เดิม (ข้อมูลประวัติ กลุ่มงานการพยาบาล โรงพยาบาลโนนศิลา.xlsx)<br>
+        ระบบจะนำเข้าข้อมูลจากทุก Sheet โดยอัตโนมัติ
+      </p>
+      <label class="upload-zone" style="max-width:500px;cursor:pointer">
+        <input type="file" accept=".xlsx,.xls" class="hidden" id="importFile" onchange="window.handleImport(event)">
+        <i class="fas fa-file-excel" style="color:#217346"></i>
+        <p><strong>คลิกเพื่อเลือกไฟล์ Excel</strong></p>
+        <p class="text-sm text-muted">รองรับ .xlsx, .xls</p>
+      </label>
+      <div id="importProgress" style="margin-top:1.5rem"></div>
+    </div>`;
+}
+
+async function handleImport(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const prog = document.getElementById('importProgress');
+  prog.innerHTML = '<div className="loading"><div class="spinner"></div><span>กำลังอ่านไฟล์ Excel...</span></div>';
+
+  try {
+    const ab = await file.arrayBuffer();
+    const wb = XLSX.read(ab, { type:'array' });
+
+    const sheetMap = {
+      nurses:   'ข้อมูลพนักงานพยาบาล ต่อกัน',
+      aemt:     'ประวัติ พยาบาลAEMT',
+      staff:    'ประวัติ พนักงาน',
+      training: 'ADD อบรมหลักสูตรแต่ละคน',
+      courses:  'ทะเบียนหลักสูตรสมรรถนะ',
+    };
+
+    const data = {};
+    Object.keys(sheetMap).forEach(key => {
+      const ws = wb.Sheets[sheetMap[key]];
+      if (ws) data[key] = XLSX.utils.sheet_to_json(ws, { defval:'' }).filter(r => r['ชื่อ-สกุล'] || r['หลักสูตร']);
+    });
+
+    window.pendingImportData = data;
+    prog.innerHTML = `
+      <div class="card" style="border:2px solid var(--primary)">
+        <div class="card-title" style="margin-bottom:1rem"><i class="fas fa-eye"></i>ตรวจสอบข้อมูลก่อนนำเข้า</div>
+        <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
+          ${Object.keys(data).map(k=>`
+            <div class="stat-card">
+              <div class="stat-icon green"><i class="fas fa-table"></i></div>
+              <div><div class="stat-value">${(data[k]||[]).length}</div><div class="stat-label">${{nurses:'พยาบาล',aemt:'พยาบาล AEMT',staff:'พนักงาน',training:'อบรม',courses:'หลักสูตร'}[k]}</div></div>
+            </div>`).join('')}
+        </div>
+        <div style="margin-top:1.5rem">
+          <button class="btn btn-primary" onclick="window.confirmImport()">
+            <i class="fas fa-file-import"></i>นำเข้าข้อมูลทั้งหมด
+          </button>
+        </div>
+      </div>`;
+  } catch(err) {
+    prog.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation"></i><p>${err.message}</p></div>`;
+  }
+}
+
+async function confirmImport() {
+  const dataStr = window.pendingImportData;
+  const prog = document.getElementById('importProgress');
+  prog.innerHTML = '<div className="loading"><div class="spinner"></div><span>กำลังนำเข้าข้อมูล... อาจใช้เวลาสักครู่</span></div>';
+  try {
+    const result = await api('importAll', { data: dataStr });
+    const r = result.results;
+    prog.innerHTML = `
+      <div class="card" style="border:2px solid var(--success)">
+        <div class="card-title" style="color:var(--success);margin-bottom:1rem"><i class="fas fa-check-circle"></i>นำเข้าสำเร็จ!</div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-icon green"><i class="fas fa-user-nurse"></i></div><div><div class="stat-value">${r.nurses}</div><div class="stat-label">พยาบาล</div></div></div>
+          <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-ambulance"></i></div><div><div class="stat-value">${r.aemt}</div><div class="stat-label">AEMT</div></div></div>
+          <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-users"></i></div><div><div class="stat-value">${r.staff}</div><div class="stat-label">พนักงาน</div></div></div>
+          <div class="stat-card"><div class="stat-icon green"><i class="fas fa-graduation-cap"></i></div><div><div class="stat-value">${r.training}</div><div class="stat-label">อบรม</div></div></div>
+        </div>
+        ${(r.errors ? r.errors.length : 0) ? `<div style="margin-top:1rem;color:var(--danger)"><strong>ข้อผิดพลาด:</strong><br>${r.errors.join('<br>')}</div>` : ''}
+        <button class="btn btn-primary" style="margin-top:1rem" onclick="window.navigate('staffList')"><i class="fas fa-users"></i>ดูรายชื่อบุคลากร</button>
+      </div>`;
+    showToast('นำเข้าข้อมูลสำเร็จ', 'success');
+  } catch(err) {
+    prog.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation"></i><p>เกิดข้อผิดพลาด: ${err.message}</p></div>`;
+    showToast(err.message, 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════
+function formatDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const day = d.getDate().toString().padStart(2,'0');
+    const mon = (d.getMonth()+1).toString().padStart(2,'0');
+    const yr  = d.getFullYear() + 543;
+    return `${day}/${mon}/${yr}`;
+  } catch(e) { return iso }
+}
+
+function printEl(id) {
+  const content = (document.getElementById(id) ? document.getElementById(id).innerHTML : '');
+  const win = window.open('', '_blank');
+  win.document.write('<html><head><title>พิมพ์เอกสาร</title></head><body>' + content + '</body></html>');
+  win.document.close();
+  win.print();
+}
+
+window.openEditStaff = typeof openEditStaff !== 'undefined' ? openEditStaff : null;
+window.deleteStaff = typeof deleteStaff !== 'undefined' ? deleteStaff : null;
+window.saveStaff = typeof saveStaff !== 'undefined' ? saveStaff : null;
+window.openAddStaff = typeof openAddStaff !== 'undefined' ? openAddStaff : null;
+window.uploadPhoto = typeof uploadPhoto !== 'undefined' ? uploadPhoto : null;
+window.printProfile = typeof printProfile !== 'undefined' ? printProfile : null;
+window.openResignModal = typeof openResignModal !== 'undefined' ? openResignModal : null;
+window.confirmCancelResignation = typeof confirmCancelResignation !== 'undefined' ? confirmCancelResignation : null;
+window.viewProfile = typeof viewProfile !== 'undefined' ? viewProfile : null;
+window.switchTab = typeof switchTab !== 'undefined' ? switchTab : null;
+window.toggleNurseFields = typeof toggleNurseFields !== 'undefined' ? toggleNurseFields : null;
+window.printEl = typeof printEl !== 'undefined' ? printEl : null;
+
+})();
+
+
+window.showRegisterForm = async function() {
+  var loginForm = document.getElementById("loginForm");
+  var regCard = document.getElementById("registerCard");
+  if (loginForm) loginForm.classList.add("hidden");
+  if (regCard) regCard.classList.remove("hidden");
+  
+  // Load departments from database (public - no token needed)
+  var depts = [];
+  try {
+    depts = await new Promise(function(resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function(res) { resolve((res && res.success) ? (res.data || []) : []); })
+        .withFailureHandler(function() { resolve([]); })
+        .handleApiCall('getDepartmentsPublic', {});
+    });
+  } catch(e) {
+    console.error('Failed to load departments:', e);
+  }
+  // Fallback defaults if DB is empty
+  if (!depts || !depts.length) {
+    depts = ['ER','IPD','OPD','จ่ายกลาง','ห้องผ่าตัด','ห้องคลอด','อุบัติเหตุ','กลุ่มงานการพยาบาล'];
+  }
+  var deptOptions = depts.map(function(d) { return '<option value="'+d+'">'+d+'</option>'; }).join('');
+  
+  if (regCard) {
+    regCard.innerHTML = 
+      '<div style="background:linear-gradient(135deg,#1d4ed8,#3b82f6);padding:1.5rem 2rem;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between;">'
+      + '<div style="color:white;font-size:1.15rem;font-weight:700;"><i class="fas fa-user-plus" style="margin-right:0.5rem"></i>ลงทะเบียนพนักงานใหม่</div>'
+      + '<button type="button" onclick="window.closeRegisterForm()" style="background:transparent;border:none;color:white;font-size:1.5rem;cursor:pointer;line-height:1;"><i class="fas fa-times"></i></button>'
+      + '</div>'
+      + '<div style="padding:1.5rem 2rem;">'
+      + '<form onsubmit="window.submitPublicRegister(event)" id="publicRegForm">'
+      
+      // Section 1: Personal Info
+      + '<div class="form-section">'
+      + '<div class="form-section-title"><i class="fas fa-user"></i>ข้อมูลส่วนตัว (เข้าสู่ระบบด้วย เลขบัตรประชาชน และรหัสผ่านเป็น เบอร์โทรศัพท์)</div>'
+      + '<div class="form-grid-2">'
+      + '<div class="form-group"><label>ชื่อ-สกุล *</label><input type="text" name="name" required placeholder="นาย / นาง / นางสาว..."></div>'
+      + '<div class="form-group"><label>ชื่อเล่น</label><input type="text" name="nickname" placeholder="เช่น ส้ม"></div>'
+      + '<div class="form-group"><label>เลขบัตรประชาชน (13 หลัก) *</label><input type="text" name="idCard" required maxlength="13" minlength="13" pattern="[0-9]{13}" placeholder="13 หลัก"></div>'
+      + '<div class="form-group"><label>เบอร์โทรศัพท์ (รหัสผ่าน) *</label><input type="text" name="phone" required placeholder="เช่น 0891234567"></div>'
+      + '<div class="form-group"><label>สถานะภาพ</label><select name="maritalStatus"><option>โสด</option><option>สมรส</option><option>หม้าย</option><option>หย่าร้าง</option></select></div>'
+      + '<div class="form-group"><label>วันเกิด</label><input type="date" name="dob"></div>'
+      + '<div class="form-group" style="grid-column:1/-1"><label>ที่อยู่</label><textarea name="address" rows="2" placeholder="ที่อยู่ปัจจุบัน"></textarea></div>'
+      + '</div></div>'
+      
+      // Section 2: Work Info
+      + '<div class="form-section">'
+      + '<div class="form-section-title"><i class="fas fa-briefcase"></i>ข้อมูลตำแหน่งและการทำงาน</div>'
+      + '<div class="form-grid-2">'
+      + '<div class="form-group"><label>ตำแหน่ง</label><input type="text" name="position" placeholder="เช่น พยาบาลวิชาชีพชำนาญการ"></div>'
+      + '<div class="form-group"><label>ประเภทบุคลากร</label><select name="empType"><option>ข้าราชการ</option><option>พนักงานราชการ</option><option>ลูกจ้างชั่วคราวรายเดือน</option><option>ลูกจ้างชั่วคราวรายวัน</option><option>พนักงานกระทรวง</option></select></div>'
+      + '<div class="form-group"><label>หน่วยงาน *</label><select name="dept" required><option value="">เลือกหน่วยงาน...</option>'+deptOptions+'</select></div>'
+      + '<div class="form-group"><label>กลุ่มตำแหน่ง</label><select name="group" id="regGroupSelect" onchange="window.toggleRegNurseFields()"><option value="พยาบาล">พยาบาล</option><option value="AEMT">AEMT</option><option value="พนักงาน">พนักงาน</option></select></div>'
+      + '<div class="form-group"><label>วันเริ่มทำงาน (รายเดือน)</label><input type="date" name="startMonthly"></div>'
+      + '<div class="form-group"><label>วันเริ่มทำงาน (รายวัน)</label><input type="date" name="startDaily"></div>'
+      + '</div></div>'
+      
+      // Section 3: License Info (nurse/AEMT)
+      + '<div class="form-section" id="regNurseSection" style="display:none">'
+      + '<div class="form-section-title"><i class="fas fa-id-card"></i>ข้อมูลใบประกอบวิชาชีพ (สำหรับพยาบาล/AEMT)</div>'
+      + '<div class="form-grid-2">'
+      + '<div class="form-group"><label>เลขที่ใบประกอบวิชาชีพ</label><input type="text" name="licenseNo"></div>'
+      + '<div class="form-group"><label>วันหมดอายุ</label><input type="date" name="licenseExpiry"></div>'
+      + '</div></div>'
+      
+      // Submit button
+      + '<div style="text-align:right;margin-top:1.5rem;">'
+      + '<button type="button" onclick="window.closeRegisterForm()" class="btn btn-outline" style="margin-right:0.75rem">ยกเลิก</button>'
+      + '<button type="submit" class="btn btn-primary" id="regSubmitBtn"><i class="fas fa-save"></i> บันทึกข้อมูลลงทะเบียน</button>'
+      + '</div>'
+      + '</form></div>';
+
+    window.toggleRegNurseFields();
+  }
+};
+
+window.closeRegisterForm = function() {
+  var loginForm = document.getElementById("loginForm");
+  var regCard = document.getElementById("registerCard");
+  if (regCard) regCard.classList.add("hidden");
+  if (loginForm) loginForm.classList.remove("hidden");
+};
+
+window.toggleRegNurseFields = function() {
+  var grpEl = document.getElementById("regGroupSelect");
+  if (!grpEl) return;
+  var grp = grpEl.value;
+  var isNurse = grp === "พยาบาล" || grp === "AEMT";
+  var sec = document.getElementById("regNurseSection");
+  if (sec) {
+    sec.style.display = isNurse ? 'block' : 'none';
+  }
+};
+
+window.submitPublicRegister = async function(e) {
+  e.preventDefault();
+  var btn = document.getElementById('regSubmitBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...'; }
+  
+  var form = document.getElementById('publicRegForm');
+  if (!form) { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> บันทึกข้อมูลลงทะเบียน'; } return; }
+  var fd = new FormData(form);
+  var data = {};
+  fd.forEach(function(v, k) { data[k] = v; });
+  
+  // Build data object matching registerStaffPublic expected fields
+  var group = data.group || 'พยาบาล';
+  if (group === 'พยาบาล' || group === 'AEMT') {
+    // licenseNo and licenseExpiry already in data from form fields
+  }
+
+  try {
+    await new Promise(function(resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res && res.success) resolve(res.data);
+          else reject(new Error((res && res.error) || 'เกิดข้อผิดพลาด'));
+        })
+        .withFailureHandler(function(err) { reject(new Error(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ')); })
+        .handleApiCall('registerStaffPublic', { data: data });
+    });
+    if (typeof showToast === 'function') showToast('ลงทะเบียนสำเร็จ! เข้าสู่ระบบด้วยเลขบัตรประชาชน รหัสผ่านคือเบอร์โทรศัพท์', 'success');
+    window.closeRegisterForm();
+  } catch(err) {
+    if (typeof showToast === 'function') showToast('ล้มเหลว: ' + err.message, 'error');
+    else alert('ล้มเหลว: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> บันทึกข้อมูลลงทะเบียน'; }
+  }
+};
+
+
+
+
+window.addEventListener('DOMContentLoaded', function() {
+  if (window.State && window.State.token && window.State.user) {
+    if (typeof window.showApp === 'function') window.showApp();
+    const lastPage = window.safeGetItem ? window.safeGetItem('hr_last_page') : localStorage.getItem('hr_last_page');
+    if (typeof window.navigate === 'function') window.navigate(lastPage || 'dashboard');
+  }
+});
+
+window.handleLogout = function() {
+  if (typeof safeRemoveItem === 'function') {
+    safeRemoveItem('hr_token');
+    safeRemoveItem('hr_user');
+  } else {
+    localStorage.removeItem('hr_token');
+    localStorage.removeItem('hr_user');
+    sessionStorage.removeItem('hr_token');
+    sessionStorage.removeItem('hr_user');
+  }
+  if (window.State) {
+    window.State.token = null;
+    window.State.user = null;
+  }
+  const loginP = document.getElementById('loginPage');
+  const mainA = document.getElementById('mainApp');
+  if(loginP) loginP.classList.remove('hidden');
+  if(mainA) mainA.classList.add('hidden');
+  
+  const u = document.getElementById('loginUser');
+  const p = document.getElementById('loginPass');
+  if(u) u.value = '';
+  if(p) p.value = '';
+  
+  if (typeof showToast === 'function') showToast('ออกจากระบบแล้ว', 'info');
+};
+
+</script>
+

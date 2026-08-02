@@ -1,0 +1,904 @@
+<script>
+window._competenciesData = [];
+window._allStaffCache = [];
+window._allDepartments = [];
+
+window.renderCompetencies = async function() {
+  const container = document.getElementById('pageContainer');
+  container.innerHTML = '<div class="loading"><div class="spinner"></div><span>กำลังโหลดข้อมูล...</span></div>';
+  
+  try {
+    const [compData, staffData, deptsData] = await Promise.all([
+      api('getCompetencies'),
+      api('getStaffList', { filters: {} }),
+      api('getAllDepartments')
+    ]);
+    
+    window._competenciesData = compData || [];
+    window._allStaffCache = staffData || [];
+    window._allDepartments = deptsData || [];
+
+    renderCompetencyList();
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${err.message}</p></div>`;
+  }
+};
+
+window.renderCompetencyList = function() {
+  const container = document.getElementById('pageContainer');
+  const isAdminOrManager = State.user.role === 'admin' || State.user.role === 'high' || State.user.role === 'medium';
+  
+  let calendarHtml = '';
+  if (window._competenciesData && window._competenciesData.length > 0) {
+    const months = [
+      {v: '10', n: 'ต.ค.'}, {v: '11', n: 'พ.ย.'}, {v: '12', n: 'ธ.ค.'},
+      {v: '01', n: 'ม.ค.'}, {v: '02', n: 'ก.พ.'}, {v: '03', n: 'มี.ค.'},
+      {v: '04', n: 'เม.ย.'}, {v: '05', n: 'พ.ค.'}, {v: '06', n: 'มิ.ย.'},
+      {v: '07', n: 'ก.ค.'}, {v: '08', n: 'ส.ค.'}, {v: '09', n: 'ก.ย.'}
+    ];
+
+    let ganttRowsHtml = '';
+    
+    const uniqueYears = Array.from(new Set(window._competenciesData.map(c => c.fiscalYear))).filter(y => y).sort().reverse();
+    if (uniqueYears.length === 0) uniqueYears.push(new Date().getFullYear() + 543);
+    window._compYearFilter = window._compYearFilter || uniqueYears[0];
+    
+    const filteredComps = window._competenciesData.filter(c => {
+      if (c.fiscalYear && String(c.fiscalYear) !== String(window._compYearFilter)) return false;
+      if (window._compFilter === 'mine') return String(c.responsibleStaffId) === String(State.user.staffId);
+      if (window._compFilter === 'central') return c.type === 'central';
+      if (window._compFilter === 'department') return c.type === 'department';
+      return true; // all
+    });
+
+    if (filteredComps.length === 0) {
+      ganttRowsHtml = `<tr><td colspan="13" style="text-align:center; padding:1rem; color:var(--text-light);">ไม่มีข้อมูลตามเงื่อนไขที่เลือก</td></tr>`;
+    } else {
+      filteredComps.forEach(c => {
+        let cellsHtml = '';
+        let matchedMonths = [];
+        months.forEach((m, idx) => {
+           let match = false;
+           if (c.frequency === 'monthly' && String(c.periodValue) === m.v) match = true;
+           if (c.frequency === 'quarterly') {
+              if (c.periodValue === 'Q1' && ['10','11','12'].includes(m.v)) match = true;
+              if (c.periodValue === 'Q2' && ['01','02','03'].includes(m.v)) match = true;
+              if (c.periodValue === 'Q3' && ['04','05','06'].includes(m.v)) match = true;
+              if (c.periodValue === 'Q4' && ['07','08','09'].includes(m.v)) match = true;
+           }
+           if (c.frequency === 'biannually') {
+              if (c.periodValue === 'H1' && ['10','11','12','01','02','03'].includes(m.v)) match = true;
+              if (c.periodValue === 'H2' && ['04','05','06','07','08','09'].includes(m.v)) match = true;
+           }
+           if (c.frequency === 'annually' || c.periodValue === 'Year') match = true;
+           
+           if (match) matchedMonths.push(idx);
+        });
+        
+        for (let i=0; i<12; i++) {
+          if (matchedMonths.includes(i)) {
+            const isStart = !matchedMonths.includes(i-1);
+            const isEnd = !matchedMonths.includes(i+1);
+            
+            let bRadius = '0';
+            if (isStart && isEnd) bRadius = '4px';
+            else if (isStart) bRadius = '4px 0 0 4px';
+            else if (isEnd) bRadius = '0 4px 4px 0';
+            
+            cellsHtml += `<td style="padding:4px 0;"><div style="background:var(--primary); height:16px; border-radius:${bRadius}; opacity:0.8; margin: 0 1px;"></div></td>`;
+          } else {
+            cellsHtml += `<td style="border-left:1px dashed #eee; border-right:1px dashed #eee;"></td>`;
+          }
+        }
+        
+        ganttRowsHtml += `
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding:8px; font-size:0.9em; font-weight:500; color:var(--text-dark); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;" title="${c.title}">${c.title}</td>
+            ${cellsHtml}
+          </tr>
+        `;
+      });
+    }
+
+    calendarHtml = `
+      <div class="card" style="margin-bottom: 1.5rem; animation: fadeIn 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+        <div class="card-body" style="padding:1.2rem; overflow-x:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+            <div style="font-weight:bold; color:var(--text-dark); display:flex; align-items:center; gap:0.5rem;">
+              <i class="far fa-calendar-alt" style="color:var(--primary)"></i> ปฏิทินแผนงานประเมินสมรรถนะ
+            </div>
+            <div>
+              <select class="form-control" style="width:auto; display:inline-block; padding:0.3rem 0.6rem; height:auto; border-radius:20px; margin-right:0.5rem;" onchange="window._compYearFilter = this.value; renderCompetencyList();">
+                ${uniqueYears.map(y => `<option value="${y}" ${String(window._compYearFilter) === String(y) ? 'selected' : ''}>ปีงบฯ ${y}</option>`).join('')}
+              </select>
+              <select class="form-control" style="width:auto; display:inline-block; padding:0.3rem 0.6rem; height:auto; border-radius:20px;" onchange="window._compFilter = this.value; renderCompetencyList();">
+                <option value="all" ${window._compFilter === 'all' || !window._compFilter ? 'selected' : ''}>ทั้งหมด</option>
+                <option value="mine" ${window._compFilter === 'mine' ? 'selected' : ''}>เฉพาะที่ฉันรับผิดชอบ</option>
+                <option value="central" ${window._compFilter === 'central' ? 'selected' : ''}>สมรรถนะหลัก (Core)</option>
+                <option value="department" ${window._compFilter === 'department' ? 'selected' : ''}>สมรรถนะประจำสายงาน</option>
+              </select>
+            </div>
+          </div>
+          <table style="width:100%; border-collapse: collapse; min-width:800px;">
+            <thead>
+              <tr>
+                <th style="width:25%; padding:8px; border-bottom:2px solid var(--border); text-align:left;">ชื่อแบบประเมิน</th>
+                ${months.map(m => `<th style="padding:8px; border-bottom:2px solid var(--border); text-align:center; font-size:0.9em; width:6%;">${m.n}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${ganttRowsHtml}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+  
+  let html = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+      <h2 style="margin:0; font-size:1.5rem; color:var(--text-dark)"><i class="fas fa-graduation-cap text-primary"></i> สมรรถนะบุคลากร</h2>
+      ${isAdminOrManager ? '<button class="btn btn-primary" onclick="showCompetencyModal()"><i class="fas fa-plus"></i> สร้างแบบประเมิน</button>' : ''}
+    </div>
+    
+    ${calendarHtml}
+    
+    <div class="card" style="animation: slideIn 0.3s ease-out">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>ชื่อแบบประเมิน</th>
+              <th>ผู้รับผิดชอบ / ประเภท</th>
+              <th>รอบประเมิน</th>
+              <th>จำนวนหัวข้อ</th>
+              <th style="text-align:right">การจัดการ</th>
+            </tr>
+          </thead>
+          <tbody>
+  `;
+  
+  if (!window._competenciesData || window._competenciesData.length === 0) {
+    html += `<tr><td colspan="5" style="text-align:center; padding: 2rem; color: var(--text-light)">ยังไม่มีข้อมูลแบบประเมิน</td></tr>`;
+  } else {
+    window._competenciesData.forEach(comp => {
+      const typeBadge = comp.type === 'central' 
+          ? '<span class="badge badge-purple">สมรรถนะหลัก (Core)</span>'
+          : '<span class="badge badge-blue">สมรรถนะประจำสายงาน</span>';
+      
+      const freqMap = { 'monthly': 'รายเดือน', 'quarterly': 'รายไตรมาส', 'biannually': 'รายครึ่งปี', 'annually': 'รายปี' };
+      const freq = freqMap[comp.frequency] || comp.frequency;
+      
+      let pText = comp.periodValue || '';
+      if (comp.frequency === 'quarterly') {
+        const qm = {'Q1': 'ไตรมาส 1 (ต.ค.-ธ.ค.)', 'Q2': 'ไตรมาส 2 (ม.ค.-มี.ค.)', 'Q3': 'ไตรมาส 3 (เม.ย.-มิ.ย.)', 'Q4': 'ไตรมาส 4 (ก.ค.-ก.ย.)'};
+        pText = qm[pText] || pText || 'ไม่ได้ระบุ';
+      } else if (comp.frequency === 'biannually') {
+        const hm = {'H1': 'ครึ่งปีแรก (ต.ค.-มี.ค.)', 'H2': 'ครึ่งปีหลัง (เม.ย.-ก.ย.)'};
+        pText = hm[pText] || pText || 'ไม่ได้ระบุ';
+      } else if (comp.frequency === 'monthly') {
+        const mm = {'10':'ต.ค.', '11':'พ.ย.', '12':'ธ.ค.', '01':'ม.ค.', '02':'ก.พ.', '03':'มี.ค.', '04':'เม.ย.', '05':'พ.ค.', '06':'มิ.ย.', '07':'ก.ค.', '08':'ส.ค.', '09':'ก.ย.'};
+        pText = mm[pText] || pText || 'ไม่ได้ระบุ';
+      } else {
+        pText = 'ตลอดปีงบประมาณ';
+      }
+      
+      const respStaff = window._allStaffCache.find(s => String(s.id) === String(comp.responsibleStaffId));
+      const respName = comp.responsibleStaffName || (respStaff ? respStaff.name : (comp.responsibleStaffId ? `ID: ${comp.responsibleStaffId}` : 'ยังไม่ระบุ'));
+      const isOwner = String(comp.responsibleStaffId) === String(State.user.staffId) || String(comp.createdByStaffId) === String(State.user.staffId);
+      const canManage = isOwner || State.user.role === 'admin';
+          
+      html += `
+        <tr>
+          <td>
+            <div style="font-weight:600; color: var(--text-dark);">${comp.title || '-'}</div>
+            <div style="font-size:0.85em; color:var(--text-light); margin-top:4px;">${comp.description || '-'}</div>
+          </td>
+          <td>
+            <div style="font-weight:500; font-size:0.9em; margin-bottom:4px; display:flex; align-items:center; gap:0.4rem;">
+              <div style="background:var(--primary); color:white; border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:0.6rem;"><i class="fas fa-user"></i></div>
+              ${respName}
+            </div>
+            ${typeBadge}
+          </td>
+          <td>
+            <div>${freq}</div>
+            <div style="font-size:0.85em; color:var(--text-light); margin-top:2px;">รอบ: ${pText} (ปีงบฯ ${comp.fiscalYear || '-'})</div>
+          </td>
+          <td>${comp.items ? comp.items.length : 0} ข้อ</td>
+          <td style="text-align:right">
+            ${canManage ? `
+            <button class="btn btn-outline btn-sm" onclick="viewEvaluations('${comp.id}')"><i class="fas fa-clipboard-list"></i> ประเมิน/ตรวจสอบผล</button>
+            <button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="showCompetencyModal('${comp.id}')"><i class="fas fa-edit"></i> แก้ไข</button>
+            <button class="btn btn-outline btn-sm" style="margin-left:0.5rem; color:var(--danger)" onclick="deleteCompetency('${comp.id}')"><i class="fas fa-trash"></i></button>
+            ` : '<span style="font-size:0.85em; color:var(--text-light); background:#f5f5f5; padding:0.3rem 0.6rem; border-radius:12px;"><i class="fas fa-lock" style="margin-right:4px;"></i>เฉพาะผู้รับผิดชอบ</span>'}
+          </td>
+        </tr>
+      `;
+    });
+  }
+  
+  html += `
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  container.innerHTML = html;
+}
+
+window.updatePeriodOptions = function(freq, selectedVal = '') {
+  const periodSel = document.getElementById('cPeriod');
+  if (!periodSel) return;
+  periodSel.innerHTML = '';
+  let options = [];
+  
+  if (freq === 'monthly') {
+    options = [
+      { v: '10', l: 'ตุลาคม (ต.ค.)' },
+      { v: '11', l: 'พฤศจิกายน (พ.ย.)' },
+      { v: '12', l: 'ธันวาคม (ธ.ค.)' },
+      { v: '01', l: 'มกราคม (ม.ค.)' },
+      { v: '02', l: 'กุมภาพันธ์ (ก.พ.)' },
+      { v: '03', l: 'มีนาคม (มี.ค.)' },
+      { v: '04', l: 'เมษายน (เม.ย.)' },
+      { v: '05', l: 'พฤษภาคม (พ.ค.)' },
+      { v: '06', l: 'มิถุนายน (มิ.ย.)' },
+      { v: '07', l: 'กรกฎาคม (ก.ค.)' },
+      { v: '08', l: 'สิงหาคม (ส.ค.)' },
+      { v: '09', l: 'กันยายน (ก.ย.)' }
+    ];
+  } else if (freq === 'quarterly') {
+    options = [
+      { v: 'Q1', l: 'ไตรมาส 1 (ต.ค. - ธ.ค.)' },
+      { v: 'Q2', l: 'ไตรมาส 2 (ม.ค. - มี.ค.)' },
+      { v: 'Q3', l: 'ไตรมาส 3 (เม.ย. - มิ.ย.)' },
+      { v: 'Q4', l: 'ไตรมาส 4 (ก.ค. - ก.ย.)' }
+    ];
+  } else if (freq === 'biannually') {
+    options = [
+      { v: 'H1', l: 'ครึ่งปีแรก (ต.ค. - มี.ค.)' },
+      { v: 'H2', l: 'ครึ่งปีหลัง (เม.ย. - ก.ย.)' }
+    ];
+  } else {
+    options = [
+      { v: 'Year', l: 'ตลอดปีงบประมาณ' }
+    ];
+  }
+  
+  options.forEach(o => {
+    const isSel = o.v === selectedVal ? 'selected' : '';
+    periodSel.insertAdjacentHTML('beforeend', `<option value="${o.v}" ${isSel}>${o.l}</option>`);
+  });
+};
+
+window.showCompetencyModal = function(id = null) {
+  let comp = {
+    title: '', description: '', type: 'department', frequency: 'annually', fiscalYear: new Date().getFullYear() + 543, items: [],
+    targetRoles: ['high', 'medium', 'low'], targetDepts: [], periodValue: 'Year'
+  };
+  if (id) {
+    const existing = window._competenciesData.find(c => String(c.id) === String(id));
+    if (existing) comp = JSON.parse(JSON.stringify(existing));
+  }
+  
+  window._currentEditingComp = comp;
+  
+  const isCentral = comp.type === 'central';
+  const displayTarget = isCentral ? 'block' : 'none';
+  
+  const isAdmin = State.user.role === 'admin';
+  let respOptions = '';
+  if (isAdmin) {
+    window._allStaffCache.forEach(s => {
+      const sel = String(comp.responsibleStaffId) === String(s.id) ? 'selected' : '';
+      respOptions += `<option value="${s.id}" ${sel}>${s.name}</option>`;
+    });
+  } else {
+    const curId = State.user.staffId;
+    const curStaff = window._allStaffCache.find(s => String(s.id) === String(curId));
+    respOptions = `<option value="${curId}" selected>${curStaff ? curStaff.name : 'ตนเอง'}</option>`;
+  }
+  
+  const targetRoles = comp.targetRoles || ['high', 'medium', 'low'];
+  const roleHighChecked = targetRoles.includes('high') ? 'checked' : '';
+  const roleMediumChecked = targetRoles.includes('medium') ? 'checked' : '';
+  const roleLowChecked = targetRoles.includes('low') ? 'checked' : '';
+  
+  const targetDepts = comp.targetDepts || [];
+  let deptCheckboxes = '';
+  window._allDepartments.forEach(d => {
+    const isChecked = targetDepts.length === 0 || targetDepts.includes(d) ? 'checked' : '';
+    deptCheckboxes += `
+      <label style="display:flex; align-items:center; gap:0.6rem; font-size:0.9em; padding:0.6rem; border:1px solid var(--border); border-radius:6px; cursor:pointer; background:#fff; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='var(--border)'">
+        <input type="checkbox" class="tgt-dept-cb" value="${d}" ${isChecked} style="accent-color:var(--primary); width:16px; height:16px;" onchange="this.parentElement.style.borderColor = this.checked ? 'var(--primary)' : 'var(--border)'">
+        <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${d}">${d}</span>
+      </label>
+    `;
+  });
+
+  const modalHtml = `
+    <div class="modal-overlay" id="compModal" style="display:flex; animation: fadeIn 0.2s;">
+      <div class="modal-content" style="max-width: 800px; width: 90%; max-height: 90vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; border-radius: 12px;">
+        <div class="modal-header" style="background: var(--primary); color: white; padding: 1.2rem 1.5rem; border-bottom: none;">
+          <h3 style="color: white; margin: 0; display:flex; align-items:center; gap:0.5rem;"><i class="fas fa-edit"></i> ${id ? 'แก้ไขแบบประเมิน' : 'สร้างแบบประเมินใหม่'}</h3>
+          <button class="btn-icon" onclick="document.getElementById('compModal').remove()" style="color: white; opacity: 0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" style="overflow-y: auto; padding: 1.5rem; background: #fafbfa;">
+          <div class="card" style="margin-bottom: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+            <div class="card-body">
+              <div class="form-group">
+                <label>ชื่อแบบประเมิน <span style="color:var(--danger)">*</span></label>
+                <input type="text" id="cTitle" class="form-control" value="${comp.title || ''}" placeholder="เช่น การประเมินสมรรถนะหลักประจำปี">
+              </div>
+              <div style="display:grid; grid-template-columns: 2fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label>รายละเอียด</label>
+                  <textarea id="cDesc" class="form-control" rows="2" placeholder="อธิบายจุดประสงค์ของแบบประเมินนี้">${comp.description || ''}</textarea>
+                </div>
+                <div class="form-group">
+                  <label>ผู้รับผิดชอบ <span style="color:var(--danger)">*</span></label>
+                  <select id="cResp" class="form-control" ${isAdmin ? '' : 'disabled'}>
+                    ${respOptions}
+                  </select>
+                </div>
+              </div>
+              
+              <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 0;">
+                <div class="form-group" style="margin-bottom:0">
+                  <label>ประเภทแบบประเมิน</label>
+                  <select id="cType" class="form-control" onchange="document.getElementById('cTargetSection').style.display = this.value === 'central' ? 'block' : 'none'">
+                    <option value="department" ${comp.type==='department'?'selected':''}>ประจำแผนก (ตนเอง)</option>
+                    <option value="central" ${comp.type==='central'?'selected':''}>ส่วนกลาง (เลือกได้)</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label>ความถี่</label>
+                  <select id="cFreq" class="form-control" onchange="updatePeriodOptions(this.value)">
+                    <option value="monthly" ${comp.frequency==='monthly'?'selected':''}>รายเดือน</option>
+                    <option value="quarterly" ${comp.frequency==='quarterly'?'selected':''}>รายไตรมาส</option>
+                    <option value="biannually" ${comp.frequency==='biannually'?'selected':''}>รายครึ่งปี</option>
+                    <option value="annually" ${comp.frequency==='annually'?'selected':''}>รายปี</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label>ช่วงเดือน (รอบ)</label>
+                  <select id="cPeriod" class="form-control"></select>
+                </div>
+                <div class="form-group" style="margin-bottom:0">
+                  <label>ปีงบประมาณ</label>
+                  <input type="text" id="cYear" class="form-control" value="${comp.fiscalYear || ''}">
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div id="cTargetSection" style="display:${displayTarget}; background:#fff; padding:1.5rem; border-radius:8px; margin-bottom:1.5rem; border:1px solid var(--border); box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+            <div style="font-weight:bold; margin-bottom:1.2rem; color:var(--text-dark); display:flex; align-items:center; gap:0.5rem; font-size:1.1em; border-bottom:1px solid var(--border); padding-bottom:0.8rem;">
+              <div style="background:var(--primary); color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8em;"><i class="fas fa-users-cog"></i></div>
+              การกำหนดกลุ่มเป้าหมาย (สำหรับสมรรถนะส่วนกลาง)
+            </div>
+            
+            <div style="margin-bottom:1.5rem;">
+              <div style="font-size:0.95em; font-weight:600; color:var(--text-dark); margin-bottom:0.8rem;">1. ตำแหน่งที่ต้องถูกประเมิน</div>
+              <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+                <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.95em; padding:0.6rem 1rem; border:1px solid var(--border); border-radius:20px; cursor:pointer; background:#f9f9f9; transition:all 0.2s;" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='#f9f9f9'">
+                  <input type="checkbox" id="cRoleHigh" value="high" ${roleHighChecked} style="accent-color:var(--primary); width:16px; height:16px;"> หัวหน้ากลุ่มงาน/ผู้บริหาร
+                </label>
+                <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.95em; padding:0.6rem 1rem; border:1px solid var(--border); border-radius:20px; cursor:pointer; background:#f9f9f9; transition:all 0.2s;" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='#f9f9f9'">
+                  <input type="checkbox" id="cRoleMedium" value="medium" ${roleMediumChecked} style="accent-color:var(--primary); width:16px; height:16px;"> หัวหน้างาน
+                </label>
+                <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.95em; padding:0.6rem 1rem; border:1px solid var(--border); border-radius:20px; cursor:pointer; background:#f9f9f9; transition:all 0.2s;" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='#f9f9f9'">
+                  <input type="checkbox" id="cRoleLow" value="low" ${roleLowChecked} style="accent-color:var(--primary); width:16px; height:16px;"> สมาชิก/พนักงาน
+                </label>
+              </div>
+            </div>
+            
+            <div>
+              <div style="font-size:0.95em; font-weight:600; color:var(--text-dark); margin-bottom:0.8rem; display:flex; justify-content:space-between; align-items:center;">
+                <span>2. หน่วยงานเป้าหมาย</span>
+                <span style="font-size:0.8em; font-weight:normal; color:var(--text-light); background:#f0f0f0; padding:2px 8px; border-radius:12px;">(เลือกทั้งหมด = ครอบคลุมทั้งโรงพยาบาล)</span>
+              </div>
+              <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:0.8rem; max-height:220px; overflow-y:auto; padding:0.5rem; background:#fbfbfb; border:1px solid var(--border); border-radius:8px;">
+                ${deptCheckboxes}
+              </div>
+            </div>
+          </div>
+          
+          <div class="card" style="box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom:0;">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; padding: 1rem 1.2rem;">
+              <div style="font-weight:600; font-size:1.05em;"><i class="fas fa-list-ul" style="color:var(--primary); margin-right:6px;"></i> หัวข้อการประเมิน (Items)</div>
+              <button class="btn btn-outline btn-sm" onclick="addCompetencyItem()" style="border-radius:20px; padding:0.3rem 0.8rem;"><i class="fas fa-plus"></i> เพิ่มหัวข้อ</button>
+            </div>
+            <div class="card-body" id="cItemsContainer" style="padding: 1.2rem; background:#fafbfa;">
+              <!-- Items will be rendered here -->
+            </div>
+          </div>
+          
+        </div>
+        <div class="modal-footer" style="background:#fff; border-top: 1px solid var(--border); padding: 1rem 1.5rem;">
+          <button class="btn btn-outline" onclick="document.getElementById('compModal').remove()">ยกเลิก</button>
+          <button class="btn btn-primary" onclick="saveCompetency()" style="padding:0.5rem 1.5rem;"><i class="fas fa-save"></i> บันทึกข้อมูล</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  updatePeriodOptions(comp.frequency || 'monthly', comp.periodValue || 'Year');
+  renderCompetencyItems();
+  
+  // Set initial border color based on checked state for dept checkboxes
+  document.querySelectorAll('.tgt-dept-cb').forEach(cb => {
+      if(cb.checked) cb.parentElement.style.borderColor = 'var(--primary)';
+  });
+};
+
+window.renderCompetencyItems = function() {
+  const container = document.getElementById('cItemsContainer');
+  const items = window._currentEditingComp.items || [];
+  
+  if (items.length === 0) {
+    container.innerHTML = '<div style="text-align:center; padding: 2rem; color:var(--text-light); border:2px dashed var(--border); border-radius:8px; background:#fff;"><i class="fas fa-clipboard-list" style="font-size:2rem; margin-bottom:1rem; opacity:0.3;"></i><br>ยังไม่มีหัวข้อการประเมิน กรุณากดปุ่ม "เพิ่มหัวข้อ"</div>';
+    return;
+  }
+  
+  let html = '';
+  items.forEach((item, index) => {
+    html += `
+      <div style="display:flex; gap:0.8rem; margin-bottom: 0.8rem; align-items:center; background:#fff; padding:0.5rem 0.5rem 0.5rem 1rem; border:1px solid var(--border); border-radius:8px; transition:all 0.2s;" onmouseover="this.style.boxShadow='0 2px 5px rgba(0,0,0,0.05)'" onmouseout="this.style.boxShadow='none'">
+        <div style="font-weight:bold; color:var(--primary); width: 25px;">${index+1}.</div>
+        <div style="flex:1">
+          <input type="text" class="form-control" value="${item.title || ''}" placeholder="ระบุรายละเอียดหัวข้อที่ต้องการประเมิน..." 
+                 onchange="updateCompetencyItem(${index}, this.value)" style="border:none; background:transparent; padding:0.5rem 0; box-shadow:none;">
+        </div>
+        <button class="btn-icon" style="color:var(--danger); width:32px; height:32px; border-radius:50%; background:#fff0f0;" onclick="removeCompetencyItem(${index})" title="ลบหัวข้อนี้"><i class="fas fa-times"></i></button>
+      </div>
+    `;
+  });
+  container.innerHTML = html;
+};
+
+window.addCompetencyItem = function() {
+  if (!window._currentEditingComp.items) window._currentEditingComp.items = [];
+  window._currentEditingComp.items.push({ title: '' });
+  renderCompetencyItems();
+  
+  // auto focus latest item
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#cItemsContainer input[type="text"]');
+    if(inputs.length > 0) inputs[inputs.length-1].focus();
+  }, 50);
+};
+
+window.updateCompetencyItem = function(index, value) {
+  if (window._currentEditingComp.items[index]) {
+    window._currentEditingComp.items[index].title = value;
+  }
+};
+
+window.removeCompetencyItem = function(index) {
+  window._currentEditingComp.items.splice(index, 1);
+  renderCompetencyItems();
+};
+
+window.saveCompetency = async function() {
+  const title = document.getElementById('cTitle').value.trim();
+  if (!title) return showToast('กรุณาระบุชื่อแบบประเมิน', 'error');
+  
+  // ensure inputs are saved to state
+  const inputs = document.querySelectorAll('#cItemsContainer input[type="text"]');
+  inputs.forEach((inp, i) => {
+    if (window._currentEditingComp.items[i]) {
+      window._currentEditingComp.items[i].title = inp.value;
+    }
+  });
+  
+  // filter empty
+  window._currentEditingComp.items = window._currentEditingComp.items.filter(it => it.title.trim() !== '');
+  
+  const type = document.getElementById('cType').value;
+  let targetRoles = [];
+  let targetDepts = [];
+  
+  if (type === 'central') {
+    if (document.getElementById('cRoleHigh').checked) targetRoles.push('high');
+    if (document.getElementById('cRoleMedium').checked) targetRoles.push('medium');
+    if (document.getElementById('cRoleLow').checked) targetRoles.push('low');
+    
+    document.querySelectorAll('.tgt-dept-cb:checked').forEach(cb => targetDepts.push(cb.value));
+    
+    if (targetDepts.length === window._allDepartments.length) {
+      targetDepts = [];
+    }
+  }
+
+  const payload = {
+    ...window._currentEditingComp,
+    title: title,
+    description: document.getElementById('cDesc').value.trim(),
+    type: type,
+    frequency: document.getElementById('cFreq').value,
+    periodValue: document.getElementById('cPeriod').value,
+    fiscalYear: document.getElementById('cYear').value.trim(),
+    responsibleStaffId: document.getElementById('cResp').value,
+    targetRoles: targetRoles,
+    targetDepts: targetDepts
+  };
+  
+  const btn = document.querySelector('#compModal .btn-primary');
+  const orgHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> บันทึก...';
+  btn.disabled = true;
+  
+  try {
+    const res = await api('saveCompetency', { data: payload });
+    showToast(res.message || 'บันทึกสำเร็จ', 'success');
+    document.getElementById('compModal').remove();
+    renderCompetencies(); 
+  } catch (err) {
+    showToast(err.message, 'error');
+    btn.innerHTML = orgHtml;
+    btn.disabled = false;
+  }
+};
+
+window.deleteCompetency = async function(id) {
+  if (!confirm('คุณแน่ใจหรือไม่ว่าต้องการลบแบบประเมินนี้? ข้อมูลการประเมินที่เกี่ยวข้องจะถูกลบด้วย')) return;
+  
+  try {
+    const res = await api('deleteCompetency', { id });
+    showToast(res.message || 'ลบสำเร็จ', 'success');
+    renderCompetencies();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.viewEvaluations = async function(compId) {
+  const comp = window._competenciesData.find(c => String(c.id) === String(compId));
+  if (!comp) return;
+  
+  const container = document.getElementById('pageContainer');
+  container.innerHTML = '<div class="loading"><div class="spinner"></div><span>กำลังโหลดข้อมูลการประเมิน...</span></div>';
+  
+  try {
+    const [evals, allStaff] = await Promise.all([
+      api('getEvaluations', { filters: { competencyId: compId } }),
+      api('getStaffList', { filters: { competencyId: compId } })
+    ]);
+    
+    renderEvaluationList(comp, evals, allStaff);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${err.message}</p></div>`;
+  }
+};
+
+window.renderEvaluationList = function(comp, evals, allStaff) {
+  const container = document.getElementById('pageContainer');
+  
+  let targetStaff = allStaff;
+  
+  if (comp.type === 'department') {
+    targetStaff = targetStaff.filter(s => String(s.dept || '').trim() === String(comp.department || '').trim());
+  } else if (comp.type === 'central') {
+    if (comp.targetRoles && comp.targetRoles.length > 0) {
+      targetStaff = targetStaff.filter(s => {
+        const pos = String(s.type || s.position || '').toLowerCase();
+        let role = s.systemRole || 'low';
+        if (role === 'admin') role = 'high';
+        if (role === 'low') {
+          if (pos.includes('หัวหน้ากลุ่ม') || pos.includes('ผู้บริหาร') || pos.includes('ผอ.')) role = 'high';
+          else if (pos.includes('หัวหน้า')) role = 'medium';
+        }
+        return comp.targetRoles.includes(role);
+      });
+    }
+    
+    if (comp.targetDepts && comp.targetDepts.length > 0) {
+      targetStaff = targetStaff.filter(s => comp.targetDepts.includes(String(s.dept || '').trim()));
+    }
+  }
+  
+  // Apply visibility rules based on role, UNLESS they are the owner of the competency
+  const isOwner = String(comp.responsibleStaffId) === String(State.user.staffId) || String(comp.createdByStaffId) === String(State.user.staffId);
+  const isAdmin = State.user.role === 'admin' || State.user.role === 'high';
+
+  if (!isOwner && !isAdmin) {
+    if (State.user.role === 'low') {
+      targetStaff = targetStaff.filter(s => String(s.id) === String(State.user.id));
+    } else if (State.user.role === 'medium') {
+      const userDept = String(State.user.dept || '').trim();
+      targetStaff = targetStaff.filter(s => {
+        if (String(s.id) === String(State.user.id)) return true;
+        if (String(s.dept || '').trim() === userDept) return true;
+        return false;
+      });
+    }
+  }
+  
+  const isManager = State.user.role === 'admin' || State.user.role === 'high' || State.user.role === 'medium';
+  
+  let pText = comp.periodValue || '';
+  if (comp.frequency === 'quarterly') {
+    const qm = {'Q1': 'ไตรมาส 1 (ต.ค.-ธ.ค.)', 'Q2': 'ไตรมาส 2 (ม.ค.-มี.ค.)', 'Q3': 'ไตรมาส 3 (เม.ย.-มิ.ย.)', 'Q4': 'ไตรมาส 4 (ก.ค.-ก.ย.)'};
+    pText = qm[pText] || pText || 'ไม่ได้ระบุ';
+  } else if (comp.frequency === 'biannually') {
+    const hm = {'H1': 'ครึ่งปีแรก (ต.ค.-มี.ค.)', 'H2': 'ครึ่งปีหลัง (เม.ย.-ก.ย.)'};
+    pText = hm[pText] || pText || 'ไม่ได้ระบุ';
+  } else if (comp.frequency === 'monthly') {
+    const mm = {'10':'ต.ค.', '11':'พ.ย.', '12':'ธ.ค.', '01':'ม.ค.', '02':'ก.พ.', '03':'มี.ค.', '04':'เม.ย.', '05':'พ.ค.', '06':'มิ.ย.', '07':'ก.ค.', '08':'ส.ค.', '09':'ก.ย.'};
+    pText = mm[pText] || pText || 'ไม่ได้ระบุ';
+  } else {
+    pText = 'ตลอดปีงบประมาณ';
+  }
+      
+  let html = `
+    <div style="margin-bottom: 1rem;">
+      <button class="btn btn-outline btn-sm" onclick="renderCompetencies()"><i class="fas fa-arrow-left"></i> กลับไปหน้ารายการ</button>
+    </div>
+    <div class="card" style="animation: slideIn 0.3s ease-out">
+      <div class="card-header" style="background:#fbfbfb; border-bottom:1px solid var(--border);">
+        <div class="card-title" style="color:var(--primary);"><i class="fas fa-clipboard-check"></i> แบบประเมิน: ${comp.title} <span style="font-size:0.85em; font-weight:normal; color:var(--text-light); margin-left:10px;">(รอบ: ${pText} ปี ${comp.fiscalYear})</span></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>รายชื่อบุคลากร</th>
+              <th>หน่วยงาน</th>
+              ${comp.items ? comp.items.map((it, i) => `<th style="min-width:80px; text-align:center;" title="${it.title}">ข้อ ${i+1}</th>`).join('') : ''}
+              <th style="text-align:center; min-width:80px;">รวม</th>
+              <th style="text-align:center;">สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>
+  `;
+  
+  if (targetStaff.length === 0) {
+    html += `<tr><td colspan="5" style="text-align:center; padding: 3rem; color:var(--text-light);"><i class="fas fa-folder-open" style="font-size:2.5rem; opacity:0.3; margin-bottom:1rem; display:block;"></i>ไม่พบบุคลากรเป้าหมายตามเงื่อนไข</td></tr>`;
+  } else {
+    targetStaff.forEach(s => {
+      const currentPeriod = comp.fiscalYear;
+      const evaluation = evals.find(e => String(e.evaluateeStaffId) === String(s.id) && String(e.period) === String(currentPeriod));
+      
+      const isEvaluated = evaluation && Number(evaluation.totalScore) > 0;
+      const statusBadge = isEvaluated 
+        ? '<span class="badge badge-green"><i class="fas fa-check-circle"></i> ประเมินแล้ว</span>'
+        : '<span class="badge badge-gray"><i class="fas fa-clock"></i> ยังไม่ประเมิน</span>';
+        
+      const scoreText = evaluation && evaluation.totalScore ? evaluation.totalScore : '-';
+      
+      let scoreCols = '';
+      let totalScoreText = evaluation && evaluation.totalScore ? evaluation.totalScore : '-';
+      let parsedScores = {};
+      try { parsedScores = evaluation && evaluation.scores ? (typeof evaluation.scores === 'string' ? JSON.parse(evaluation.scores) : evaluation.scores) : {}; } catch(e){}
+      
+      if (comp.items && comp.items.length > 0) {
+        scoreCols = comp.items.map((it, i) => {
+          let val = parsedScores[i] !== undefined ? parsedScores[i] : '';
+          if (isManager) {
+            return `<td><input type="number" min="0" max="10" step="0.1" class="form-control bulk-score" data-staff="${s.id}" data-index="${i}" value="${val}" onchange="calcBulkTotal('${s.id}')" onkeyup="calcBulkTotal('${s.id}')" style="width: 70px; text-align: center; margin: 0 auto; padding: 4px;"></td>`;
+          } else {
+            return `<td style="text-align:center;">${val !== '' ? val : '-'}</td>`;
+          }
+        }).join('');
+      }
+      
+      html += `
+        <tr>
+          <td>
+            <div style="font-weight:600; color:var(--text-dark);">${s.name || '-'}</div>
+            <div style="font-size:0.85em; color:var(--text-light)">${s.position || '-'}</div>
+          </td>
+          <td>${s.dept || '-'}</td>
+          ${scoreCols}
+          <td style="font-weight:bold; text-align:center; color: ${isEvaluated ? 'var(--primary)' : 'inherit'}" id="bulk-total-${s.id}">${totalScoreText}</td>
+          <td style="text-align:center;">${statusBadge}</td>
+        </tr>
+      `;
+    });
+  }
+  
+  html += `
+          </tbody>
+        </table>
+      </div>
+      ${isManager && targetStaff.length > 0 ? `
+      <div style="padding: 1rem; border-top: 1px solid var(--border); text-align:right; background:#f9fafb;">
+        <button class="btn btn-primary" id="btn-bulk-save" onclick="saveBulkEvaluations('${comp.id}')" style="padding: 0.6rem 1.5rem;"><i class="fas fa-save"></i> บันทึกผลประเมินทั้งหมด</button>
+      </div>` : ''}
+    </div>
+  `;
+  container.innerHTML = html;
+};
+
+window.showEvaluationModal = function(compId, staffId, evalStr) {
+  const comp = window._competenciesData.find(c => String(c.id) === String(compId));
+  if (!comp) return;
+  
+  let evaluation = null;
+  try { evaluation = JSON.parse(decodeURIComponent(evalStr)); } catch(e){}
+  
+  const scores = evaluation ? (evaluation.scores || {}) : {};
+  
+  let itemsHtml = '';
+  if (!comp.items || comp.items.length === 0) {
+    itemsHtml = '<p style="text-align:center; padding: 2rem; color: var(--text-light)">ไม่มีหัวข้อให้ประเมิน</p>';
+  } else {
+    itemsHtml += `<div class="eval-grid" style="display:grid; grid-template-columns: 1fr 100px; gap: 1rem; border-bottom: 2px solid var(--border); padding-bottom: 0.8rem; margin-bottom: 1.2rem; font-weight:bold; color:var(--text-dark);">
+      <div>หัวข้อสมรรถนะ</div>
+      <div style="text-align:center">คะแนน (0-10)</div>
+    </div>`;
+    
+    comp.items.forEach((item, index) => {
+      const val = scores[index] || '';
+      itemsHtml += `
+        <div style="display:grid; grid-template-columns: 1fr 100px; gap: 1rem; margin-bottom: 1rem; align-items:center; padding-bottom:1rem; border-bottom:1px dashed var(--border);">
+          <div style="line-height:1.4;">
+             <span style="color:var(--primary); font-weight:bold; margin-right:4px;">${index+1}.</span> ${item.title}
+          </div>
+          <div>
+            <input type="number" class="form-control e-score" data-index="${index}" min="0" max="10" value="${val}" style="text-align:center; font-weight:bold; font-size:1.1em; color:var(--primary);" oninput="calculateTotalScore()">
+          </div>
+        </div>
+      `;
+    });
+  }
+  
+  let pText = comp.periodValue || '';
+  if (comp.frequency === 'quarterly') {
+    const qm = {'Q1': 'ไตรมาส 1', 'Q2': 'ไตรมาส 2', 'Q3': 'ไตรมาส 3', 'Q4': 'ไตรมาส 4'};
+    pText = qm[pText] || pText || 'ไม่ได้ระบุ';
+  } else if (comp.frequency === 'biannually') {
+    const hm = {'H1': 'ครึ่งปีแรก', 'H2': 'ครึ่งปีหลัง'};
+    pText = hm[pText] || pText || 'ไม่ได้ระบุ';
+  } else if (comp.frequency === 'monthly') {
+    const mm = {'10':'ต.ค.', '11':'พ.ย.', '12':'ธ.ค.', '01':'ม.ค.', '02':'ก.พ.', '03':'มี.ค.', '04':'เม.ย.', '05':'พ.ค.', '06':'มิ.ย.', '07':'ก.ค.', '08':'ส.ค.', '09':'ก.ย.'};
+    pText = mm[pText] || pText || 'ไม่ได้ระบุ';
+  } else {
+    pText = 'ตลอดปีงบประมาณ';
+  }
+
+  const modalHtml = `
+    <div class="modal-overlay" id="evalModal" style="display:flex; animation: fadeIn 0.2s;">
+      <div class="modal-content" style="max-width: 700px; width: 90%; max-height: 90vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; border-radius: 12px;">
+        <div class="modal-header" style="background: var(--primary); color: white; padding: 1.2rem 1.5rem; border-bottom: none;">
+          <h3 style="color: white; margin: 0; display:flex; align-items:center; gap:0.5rem;"><i class="fas fa-star"></i> ให้คะแนนการประเมิน</h3>
+          <button class="btn-icon" onclick="document.getElementById('evalModal').remove()" style="color: white; opacity: 0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" style="overflow-y: auto; padding: 1.5rem; background:#fafbfa;">
+          <div style="margin-bottom: 1.5rem; padding: 1.2rem; background: #eef2ff; border:1px solid #c7d2fe; border-radius: 8px; border-left:4px solid var(--primary);">
+            <div style="font-weight:bold; margin-bottom: 4px; font-size:1.1em; color:var(--primary);">${comp.title}</div>
+            <div style="font-size:0.9em; color:#4f46e5;"><i class="far fa-calendar-alt"></i> รอบ: ${pText} ประจำปีงบประมาณ ${comp.fiscalYear}</div>
+          </div>
+          
+          <div style="background:#fff; border:1px solid var(--border); border-radius:8px; padding:1.5rem; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+            ${itemsHtml}
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 1rem; padding-top: 1rem; background:#fbfbfb; border-radius:8px; padding:1rem;">
+              <div style="font-weight:bold; font-size:1.1em;">คะแนนรวม</div>
+              <div id="eTotalScore" style="font-weight:bold; font-size: 1.5rem; color: var(--primary); background:#eef2ff; padding:4px 16px; border-radius:20px;">${evaluation ? evaluation.totalScore : 0}</div>
+            </div>
+          </div>
+          
+        </div>
+        <div class="modal-footer" style="background:#fff; border-top: 1px solid var(--border); padding: 1rem 1.5rem;">
+          <button class="btn btn-outline" onclick="document.getElementById('evalModal').remove()">ยกเลิก</button>
+          <button class="btn btn-primary" onclick="saveEvaluation('${compId}', '${staffId}')" style="padding:0.5rem 1.5rem;"><i class="fas fa-save"></i> บันทึกผล</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.calculateTotalScore = function() {
+  const inputs = document.querySelectorAll('.e-score');
+  let total = 0;
+  inputs.forEach(inp => {
+    total += Number(inp.value) || 0;
+  });
+  document.getElementById('eTotalScore').textContent = total;
+};
+
+window.saveEvaluation = async function(compId, staffId) {
+  const comp = window._competenciesData.find(c => String(c.id) === String(compId));
+  const inputs = document.querySelectorAll('.e-score');
+  let scores = {};
+  let totalScore = 0;
+  
+  inputs.forEach(inp => {
+    const idx = inp.getAttribute('data-index');
+    const val = Number(inp.value) || 0;
+    scores[idx] = val;
+    totalScore += val;
+  });
+  
+  const payload = {
+    competencyId: compId,
+    evaluateeStaffId: staffId,
+    period: comp.fiscalYear,
+    scores: JSON.stringify(scores),
+    totalScore: totalScore
+  };
+  
+  const btn = document.querySelector('#evalModal .btn-primary');
+  const orgHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> บันทึก...';
+  btn.disabled = true;
+  
+  try {
+    const res = await api('saveEvaluation', { data: payload });
+    showToast(res.message || 'บันทึกผลสำเร็จ', 'success');
+    document.getElementById('evalModal').remove();
+    viewEvaluations(compId); 
+  } catch (err) {
+    showToast(err.message, 'error');
+    btn.innerHTML = orgHtml;
+    btn.disabled = false;
+  }
+};
+
+window.calcBulkTotal = function(staffId) {
+  const inputs = document.querySelectorAll(`.bulk-score[data-staff="${staffId}"]`);
+  let total = 0;
+  inputs.forEach(inp => {
+    total += Number(inp.value) || 0;
+  });
+  const tEl = document.getElementById(`bulk-total-${staffId}`);
+  if(tEl) tEl.textContent = total;
+};
+
+window.saveBulkEvaluations = async function(compId) {
+  const comp = window._competenciesData.find(c => String(c.id) === String(compId));
+  if (!comp) return;
+
+  const btn = document.getElementById('btn-bulk-save');
+  const orgHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
+  btn.disabled = true;
+
+  try {
+    // Group inputs by staff
+    const allInputs = document.querySelectorAll('.bulk-score');
+    const staffData = {};
+    allInputs.forEach(inp => {
+      const sId = inp.getAttribute('data-staff');
+      const idx = inp.getAttribute('data-index');
+      if (!staffData[sId]) staffData[sId] = { scores: {}, totalScore: 0 };
+      const val = Number(inp.value) || 0;
+      staffData[sId].scores[idx] = val;
+      staffData[sId].totalScore += val;
+    });
+
+    const evaluations = Object.keys(staffData).map(sId => ({
+      competencyId: compId,
+      evaluateeStaffId: sId,
+      period: comp.fiscalYear,
+      scores: JSON.stringify(staffData[sId].scores),
+      totalScore: staffData[sId].totalScore
+    }));
+
+    if (evaluations.length === 0) {
+      showToast('ไม่มีข้อมูลให้บันทึก', 'info');
+      btn.innerHTML = orgHtml;
+      btn.disabled = false;
+      return;
+    }
+
+    const res = await api('saveEvaluationsBulk', { dataList: evaluations });
+    showToast(res.message || 'บันทึกผลทั้งหมดสำเร็จ', 'success');
+    viewEvaluations(compId);
+  } catch(err) {
+    showToast(err.message, 'error');
+    btn.innerHTML = orgHtml;
+    btn.disabled = false;
+  }
+};
+</script>
+
+
+
+
+
