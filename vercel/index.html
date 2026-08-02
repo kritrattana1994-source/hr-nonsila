@@ -1707,7 +1707,7 @@ tbody tr:last-child { border-bottom:none }
         <i class="fas fa-user-plus" style="color:#2563eb"></i> ลงทะเบียนพนักงานใหม่
       </button>
     </form>
-    <p class="login-ver">Nursing Service Organization v2569.08.03.0544</p>
+    <p class="login-ver">Nursing Service Organization v2569.08.03.0615</p>
   </div>
   
   <div id="registerCard" class="login-card glass hidden" style="width:100%; max-width:700px; margin: 2rem auto; max-height:85vh; overflow-y:auto; text-align:left;">
@@ -3522,16 +3522,27 @@ async function renderDashboard() {
 // ══════════════════════════════════════════════════
 async function renderOnboarding() {
   const c = document.getElementById('pageContainer');
-  c.innerHTML = '<div className="loading"><div class="spinner"></div><span>กำลังโหลดข้อมูล...</span></div>';
+  c.innerHTML = '<div class="loading"><div class="spinner"></div><span>กำลังโหลดข้อมูล...</span></div>';
   
   try {
+    // Load departments dynamically from database
+    let depts = [];
+    try {
+      depts = await api('getAllDepartments');
+    } catch(e) {
+      console.warn('Could not load departments:', e);
+    }
+    const deptOptions = depts.length
+      ? depts.map(d => `<option value="${d}">${d}</option>`).join('')
+      : '<option value="ER">ER</option><option value="IPD">IPD</option><option value="OPD">OPD</option><option value="จ่ายกลาง">จ่ายกลาง</option><option value="ห้องผ่าตัด">ห้องผ่าตัด</option><option value="ห้องคลอด">ห้องคลอด</option>';
+
     c.innerHTML = `
       <div class="card" style="max-width: 800px; margin: 0 auto 2rem auto;">
         <div class="card-header" style="background: linear-gradient(135deg, var(--primary), var(--accent)); color: white; padding: 1.5rem 2rem; border-radius: 16px 16px 0 0;">
           <div class="card-title" style="color: white; font-size: 1.25rem;"><i class="fas fa-user-plus"></i>ลงทะเบียนรับพนักงานใหม่</div>
         </div>
         <div style="padding: 2rem;">
-          <form onsubmit="window.saveOnboarding(event)">
+          <form onsubmit="window.saveOnboarding(event)" id="onboardingForm">
             <div class="form-section">
               <div class="form-section-title"><i class="fas fa-user"></i>ข้อมูลส่วนตัว (เข้าสู่ระบบด้วย เลขบัตรประชาชน และรหัสผ่านเป็น เบอร์โทรศัพท์)</div>
               <div class="form-grid-2">
@@ -3559,8 +3570,9 @@ async function renderOnboarding() {
                   </select>
                 </div>
                 <div class="form-group"><label>หน่วยงาน</label>
-                  <select name="dept">
-                    <option>ER</option><option>IPD</option><option>OPD</option><option>จ่ายกลาง</option><option>กลุ่มงานการพยาบาล</option><option>ห้องผ่าตัด</option><option>ห้องคลอด</option><option>อุบัติเหตุ</option>
+                  <select name="dept" required>
+                    <option value="">เลือกหน่วยงาน...</option>
+                    ${deptOptions}
                   </select>
                 </div>
                 <div class="form-group"><label>กลุ่มตำแหน่ง</label>
@@ -5084,48 +5096,68 @@ window.showRegisterForm = async function() {
   if (loginForm) loginForm.classList.add("hidden");
   if (regCard) regCard.classList.remove("hidden");
   
-  // Load departments from database
+  // Load departments from database (public - no token needed)
   var depts = [];
   try {
-    depts = await window.api('getAllDepartments');
+    depts = await _gasApiFetch('getDepartmentsPublic', {}).then(function(r){ return r.data || []; }).catch(function(){ return []; });
   } catch(e) {
     console.error('Failed to load departments:', e);
-    depts = ['ER','IPD','OPD','LR','OR','ICU','NICU','ห้องคลอด','ห้องผ่าตัด','หน่วยจ่ายกลาง','หน่วยไตเทียม'];
+  }
+  // Fallback defaults if DB is empty
+  if (!depts || !depts.length) {
+    depts = ['ER','IPD','OPD','จ่ายกลาง','ห้องผ่าตัด','ห้องคลอด','อุบัติเหตุ','กลุ่มงานการพยาบาล'];
   }
   var deptOptions = depts.map(function(d) { return '<option value="'+d+'">'+d+'</option>'; }).join('');
   
   if (regCard) {
-    regCard.innerHTML = '<div style="background:linear-gradient(135deg, #1d4ed8, #3b82f6); padding: 1.5rem; border-radius: 12px 12px 0 0; display: flex; align-items: center; justify-content: space-between;">'
-      + '<div class="card-title" style="color: white; font-size: 1.25rem; margin:0;"><i class="fas fa-user-plus"></i> ลงทะเบียนพนักงานใหม่</div>'
-      + '<button type="button" onclick="window.closeRegisterForm()" style="background:transparent; border:none; color:white; font-size:1.5rem; cursor:pointer;"><i class="fas fa-times"></i></button>'
+    regCard.innerHTML = 
+      '<div style="background:linear-gradient(135deg,#1d4ed8,#3b82f6);padding:1.5rem 2rem;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between;">'
+      + '<div style="color:white;font-size:1.15rem;font-weight:700;"><i class="fas fa-user-plus" style="margin-right:0.5rem"></i>ลงทะเบียนพนักงานใหม่</div>'
+      + '<button type="button" onclick="window.closeRegisterForm()" style="background:transparent;border:none;color:white;font-size:1.5rem;cursor:pointer;line-height:1;"><i class="fas fa-times"></i></button>'
       + '</div>'
-      + '<div style="padding: 2rem;">'
-      + '<form onsubmit="window.saveOnboarding(event)">'
+      + '<div style="padding:1.5rem 2rem;">'
+      + '<form onsubmit="window.submitPublicRegister(event)" id="publicRegForm">'
+      
+      // Section 1: Personal Info
       + '<div class="form-section">'
       + '<div class="form-section-title"><i class="fas fa-user"></i>ข้อมูลส่วนตัว (เข้าสู่ระบบด้วย เลขบัตรประชาชน และรหัสผ่านเป็น เบอร์โทรศัพท์)</div>'
       + '<div class="form-grid-2">'
-      + '<div class="form-group"><label>คำนำหน้า</label><select name="prefix"><option value="นาย">นาย</option><option value="นาง">นาง</option><option value="นางสาว">นางสาว</option></select></div>'
-      + '<div class="form-group"><label>ชื่อ-นามสกุล</label><input type="text" name="name" required></div>'
-      + '<div class="form-group"><label>เลขบัตรประชาชน (13 หลัก)</label><input type="text" name="idCard" required minlength="13" maxlength="13"></div>'
-      + '<div class="form-group"><label>เบอร์โทรศัพท์ (รหัสผ่าน)</label><input type="text" name="phone" required></div>'
-      + '<div class="form-group"><label>ตำแหน่ง</label><input type="text" name="position"></div>'
-      + '<div class="form-group"><label>ประเภทบุคลากร</label><select name="empType"><option value="ข้าราชการ">ข้าราชการ</option><option value="พนักงานราชการ">พนักงานราชการ</option><option value="พกส.">พกส.</option><option value="ลูกจ้างชั่วคราว">ลูกจ้างชั่วคราว</option><option value="ลูกจ้างรายวัน">ลูกจ้างรายวัน</option></select></div>'
+      + '<div class="form-group"><label>ชื่อ-สกุล *</label><input type="text" name="name" required placeholder="นาย / นาง / นางสาว..."></div>'
+      + '<div class="form-group"><label>ชื่อเล่น</label><input type="text" name="nickname" placeholder="เช่น ส้ม"></div>'
+      + '<div class="form-group"><label>เลขบัตรประชาชน (13 หลัก) *</label><input type="text" name="idCard" required maxlength="13" minlength="13" pattern="[0-9]{13}" placeholder="13 หลัก"></div>'
+      + '<div class="form-group"><label>เบอร์โทรศัพท์ (รหัสผ่าน) *</label><input type="text" name="phone" required placeholder="เช่น 0891234567"></div>'
+      + '<div class="form-group"><label>สถานะภาพ</label><select name="maritalStatus"><option>โสด</option><option>สมรส</option><option>หม้าย</option><option>หย่าร้าง</option></select></div>'
+      + '<div class="form-group"><label>วันเกิด</label><input type="date" name="dob"></div>'
+      + '<div class="form-group" style="grid-column:1/-1"><label>ที่อยู่</label><textarea name="address" rows="2" placeholder="ที่อยู่ปัจจุบัน"></textarea></div>'
+      + '</div></div>'
+      
+      // Section 2: Work Info
+      + '<div class="form-section">'
+      + '<div class="form-section-title"><i class="fas fa-briefcase"></i>ข้อมูลตำแหน่งและการทำงาน</div>'
+      + '<div class="form-grid-2">'
+      + '<div class="form-group"><label>ตำแหน่ง</label><input type="text" name="position" placeholder="เช่น พยาบาลวิชาชีพชำนาญการ"></div>'
+      + '<div class="form-group"><label>ประเภทบุคลากร</label><select name="empType"><option>ข้าราชการ</option><option>พนักงานราชการ</option><option>ลูกจ้างชั่วคราวรายเดือน</option><option>ลูกจ้างชั่วคราวรายวัน</option><option>พนักงานกระทรวง</option></select></div>'
+      + '<div class="form-group"><label>หน่วยงาน *</label><select name="dept" required><option value="">เลือกหน่วยงาน...</option>'+deptOptions+'</select></div>'
       + '<div class="form-group"><label>กลุ่มตำแหน่ง</label><select name="group" id="regGroupSelect" onchange="window.toggleRegNurseFields()"><option value="พยาบาล">พยาบาล</option><option value="AEMT">AEMT</option><option value="พนักงาน">พนักงาน</option></select></div>'
-      + '<div class="form-group"><label>หน่วยงาน</label><select name="dept" required><option value="">-- เลือกหน่วยงาน --</option>' + deptOptions + '</select></div>'
-      + '</div>'
-      + '</div>'
-      + '<div class="form-section hidden" id="regNurseSection">'
+      + '<div class="form-group"><label>วันเริ่มทำงาน (รายเดือน)</label><input type="date" name="startMonthly"></div>'
+      + '<div class="form-group"><label>วันเริ่มทำงาน (รายวัน)</label><input type="date" name="startDaily"></div>'
+      + '</div></div>'
+      
+      // Section 3: License Info (nurse/AEMT)
+      + '<div class="form-section" id="regNurseSection" style="display:none">'
       + '<div class="form-section-title"><i class="fas fa-id-card"></i>ข้อมูลใบประกอบวิชาชีพ (สำหรับพยาบาล/AEMT)</div>'
       + '<div class="form-grid-2">'
       + '<div class="form-group"><label>เลขที่ใบประกอบวิชาชีพ</label><input type="text" name="licenseNo"></div>'
       + '<div class="form-group"><label>วันหมดอายุ</label><input type="date" name="licenseExpiry"></div>'
-      + '</div>'
-      + '</div>'
-      + '<div style="text-align: right; margin-top: 1.5rem;">'
+      + '</div></div>'
+      
+      // Submit button
+      + '<div style="text-align:right;margin-top:1.5rem;">'
+      + '<button type="button" onclick="window.closeRegisterForm()" class="btn btn-outline" style="margin-right:0.75rem">ยกเลิก</button>'
       + '<button type="submit" class="btn btn-primary" id="regSubmitBtn"><i class="fas fa-save"></i> บันทึกข้อมูลลงทะเบียน</button>'
       + '</div>'
-      + '</form>'
-      + '</div>';
+      + '</form></div>';
+
     window.toggleRegNurseFields();
   }
 };
@@ -5144,8 +5176,36 @@ window.toggleRegNurseFields = function() {
   var isNurse = grp === "พยาบาล" || grp === "AEMT";
   var sec = document.getElementById("regNurseSection");
   if (sec) {
-    if (isNurse) sec.classList.remove("hidden");
-    else sec.classList.add("hidden");
+    sec.style.display = isNurse ? 'block' : 'none';
+  }
+};
+
+window.submitPublicRegister = async function(e) {
+  e.preventDefault();
+  var btn = document.getElementById('regSubmitBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...'; }
+  
+  var form = document.getElementById('publicRegForm');
+  if (!form) { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> บันทึกข้อมูลลงทะเบียน'; } return; }
+  var fd = new FormData(form);
+  var data = {};
+  fd.forEach(function(v, k) { data[k] = v; });
+  
+  // Build data object matching registerStaffPublic expected fields
+  var group = data.group || 'พยาบาล';
+  if (group === 'พยาบาล' || group === 'AEMT') {
+    // licenseNo and licenseExpiry already in data from form fields
+  }
+
+  try {
+    await _gasApiFetch('registerStaffPublic', { data: data });
+    if (typeof showToast === 'function') showToast('ลงทะเบียนสำเร็จ! เข้าสู่ระบบด้วยเลขบัตรประชาชน รหัสผ่านคือเบอร์โทรศัพท์', 'success');
+    window.closeRegisterForm();
+  } catch(err) {
+    if (typeof showToast === 'function') showToast('ล้มเหลว: ' + err.message, 'error');
+    else alert('ล้มเหลว: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> บันทึกข้อมูลลงทะเบียน'; }
   }
 };
 
@@ -5187,6 +5247,19 @@ window.handleLogout = function() {
   if (typeof showToast === 'function') showToast('ออกจากระบบแล้ว', 'info');
 };
 
+
+/* Vercel: helper replacing google.script.run.handleApiCall */
+function _gasApiFetch(action, params) {
+  return fetch('https://script.google.com/macros/s/AKfycbzVb68jA2o8DpzvuQ8cFbSkPr3PCzXWt0KxplKP2D--R8LG6g2QmtDWW2xLX2xngUSc/exec', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ action: action }, params || {}))
+  }).then(function(r) { return r.text(); }).then(function(t) {
+    var res = JSON.parse(t);
+    if (res && res.success) return res;
+    throw new Error((res && res.error) || 'Server error');
+  });
+}
 </script>
 </body>
 </html>
