@@ -20,19 +20,26 @@ const gasUrl = 'https://script.google.com/macros/s/AKfycbzVb68jA2o8DpzvuQ8cFbSkP
 const now = new Date();
 const versionStr = `${now.getFullYear()+543}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}.${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
-// Find the google.script.run block and replace with fetch
-const oldStart = 'function api(action, params={}) {';
-const oldEnd = 'window.api = api;';
+// Find the api function block - support both old single-function and new _apiOnce+api pattern
+let oldBlock = '';
+let startIdx = -1;
+let endIdx = -1;
 
-const startIdx = result.indexOf(oldStart);
-const endIdx = result.indexOf(oldEnd, startIdx);
+// Try new pattern first (_apiOnce + api)
+const newPatternStart = 'function _apiOnce(action, params) {';
+const newPatternStartAlt = 'function api(action, params={}) {';
+const blockEnd = 'window.api = api;';
+
+startIdx = result.indexOf(newPatternStart);
+if (startIdx === -1) startIdx = result.indexOf(newPatternStartAlt);
+endIdx = result.indexOf(blockEnd, startIdx);
 
 if (startIdx === -1 || endIdx === -1) {
   console.error('Could not find api function block!');
   process.exit(1);
 }
 
-const oldBlock = result.substring(startIdx, endIdx + oldEnd.length);
+oldBlock = result.substring(startIdx, endIdx + blockEnd.length);
 
 const newApi = `function api(action, params={}) {
   return new Promise((resolve, reject) => {
@@ -79,7 +86,7 @@ const newApi = `function api(action, params={}) {
 }
 window.api = api;`;
 
-result = result.substring(0, startIdx) + newApi + result.substring(endIdx + oldEnd.length);
+result = result.substring(0, startIdx) + newApi + result.substring(endIdx + blockEnd.length);
 
 // Replace version string
 result = result.replace(/Nursing Service Organization v[\d.]+/g, 'Nursing Service Organization v' + versionStr);
