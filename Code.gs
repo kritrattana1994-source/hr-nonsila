@@ -105,6 +105,9 @@ function doPost(e) {
       // ── Import ──
       case 'importAll':          return respond(ImportService.importAll(t, params.data));
 
+      // ── Health Check ──
+      case 'ping':               return respond({ ok: true, time: new Date().toISOString(), serverTime: Date.now() });
+
       default:
         return respondError('Unknown action: ' + action);
     }
@@ -202,6 +205,8 @@ function handleApiCall(action, params) {
 
       // ── Import ──
       case 'importAll':          return ok(ImportService.importAll(t, params.data));
+
+      case 'ping':               return ok({ ok: true, time: new Date().toISOString(), serverTime: Date.now() });
 
       default: return err('Unknown action: ' + action);
     }
@@ -3102,12 +3107,12 @@ function thaiYear(date) {
 }
 
 function respond(data) {
-  return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
+  return ContentService.createTextOutput(JSON.stringify({ success: true, data: data, _ts: Date.now() }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 function respondError(msg) {
-  return ContentService.createTextOutput(JSON.stringify({ success: false, error: msg }))
+  return ContentService.createTextOutput(JSON.stringify({ success: false, error: msg, _ts: Date.now() }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 

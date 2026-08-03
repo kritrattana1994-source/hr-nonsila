@@ -22,8 +22,6 @@ const versionStr = `${now.getFullYear()+543}.${String(now.getMonth()+1).padStart
 
 // Find the _apiOnce function block and replace with fetch version
 const oldPatternStart = 'function _apiOnce(action, params) {';
-const oldPatternEnd = '  });\r\n}';
-const oldPatternEndLF = '  });\n}';
 
 let startIdx = result.indexOf(oldPatternStart);
 if (startIdx === -1) {
@@ -31,23 +29,39 @@ if (startIdx === -1) {
   process.exit(1);
 }
 
-let endIdx = result.indexOf(oldPatternEnd, startIdx);
-let endLen = oldPatternEnd.length;
-if (endIdx === -1) {
-  endIdx = result.indexOf(oldPatternEndLF, startIdx);
-  endLen = oldPatternEndLF.length;
+// Find the closing } of the _apiOnce function by counting braces
+// The function now has structure: function _apiOnce(action, params) { ... if(isGAS){ ... return ... } }
+// We need to find the exact end
+let braceCount = 0;
+let endIdx = -1;
+let inFunction = false;
+for (let i = startIdx; i < result.length; i++) {
+  if (result[i] === '{') {
+    braceCount++;
+    inFunction = true;
+  } else if (result[i] === '}') {
+    braceCount--;
+    if (inFunction && braceCount === 0) {
+      endIdx = i;
+      break;
+    }
+  }
 }
 
 if (endIdx === -1) {
-  // Fallback: search for handleApiCall ending
+  // Fallback v1: old pattern with });\r\n}
+  const oldPatternEnd = '  });\r\n}';
+  const oldPatternEndLF = '  });\n}';
+  endIdx = result.indexOf(oldPatternEnd, startIdx);
+  if (endIdx === -1) endIdx = result.indexOf(oldPatternEndLF, startIdx);
+}
+
+if (endIdx === -1) {
+  // Fallback v2: search for handleApiCall ending
   const fallbackEnd = '.handleApiCall(action, { token: State.token, ...params });\r\n  });\r\n}';
   const fallbackEndLF = '.handleApiCall(action, { token: State.token, ...params });\n  });\n}';
   endIdx = result.indexOf(fallbackEnd, startIdx);
-  endLen = fallbackEnd.length;
-  if (endIdx === -1) {
-    endIdx = result.indexOf(fallbackEndLF, startIdx);
-    endLen = fallbackEndLF.length;
-  }
+  if (endIdx === -1) endIdx = result.indexOf(fallbackEndLF, startIdx);
 }
 
 if (endIdx === -1) {
@@ -100,7 +114,12 @@ const newApiOnce = `function _apiOnce(action, params) {
   });
 }`;
 
-result = result.substring(0, startIdx) + newApiOnce + result.substring(endIdx + endLen);
+// endLen: if found by brace counting, it's just the closing } character
+let finalEndLen = 1;
+// If we used one of the fallback patterns, endLen would be set; but we declared it as 1 above.
+// The old fallback patterns have lengths of 8-10 chars. We know brace counting gives just '}'.
+// So we just use 1 since brace counting always finds the closing brace.
+result = result.substring(0, startIdx) + newApiOnce + result.substring(endIdx + finalEndLen);
 
 // Replace version string
 result = result.replace(/Nursing Service Organization v[\d.]+/g, 'Nursing Service Organization v' + versionStr);
