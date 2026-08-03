@@ -1707,7 +1707,7 @@ tbody tr:last-child { border-bottom:none }
         <i class="fas fa-user-plus" style="color:#2563eb"></i> ลงทะเบียนพนักงานใหม่
       </button>
     </form>
-    <p class="login-ver">Nursing Service Organization v2569.08.03.1331</p>
+    <p class="login-ver">Nursing Service Organization v2569.08.03.1336</p>
   </div>
   
   <div id="registerCard" class="login-card glass hidden" style="width:100%; max-width:700px; margin: 2rem auto; max-height:85vh; overflow-y:auto; text-align:left;">
@@ -1903,7 +1903,18 @@ window.renderCompetencies = async function() {
 
     renderCompetencyList();
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${err.message}</p></div>`;
+    container.innerHTML = `
+      <div class="empty-state" style="padding: 3rem 1.5rem; text-align: center; background: white; border-radius: 12px; margin: 1.5rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+        <div style="width: 56px; height: 56px; background: #fef3c7; color: #d97706; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; margin: 0 auto 1rem;">
+          <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <h3 style="font-size: 1.15rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">เกิดข้อผิดพลาดในการโหลดข้อมูลสมรรถนะ</h3>
+        <p style="color: #6b7280; font-size: 0.95rem; max-width: 460px; margin: 0 auto 1.5rem; line-height: 1.5;">${err.message || 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้'}</p>
+        <button onclick="renderCompetencies()" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.65rem 1.5rem; border-radius: 8px; font-weight: 500;">
+          <i class="fas fa-redo"></i> ลองใหม่อีกครั้ง
+        </button>
+      </div>
+    `;
   }
 };
 
@@ -2977,13 +2988,66 @@ window.closeModal = closeModal;
   window.doNavigate = doNavigateInternal;
 window.navigate = doNavigateInternal;
 
-function api(action, params={}) {
+// ── Advanced Resilient API Client with Queue, Cache & Auto-Retry ──
+const _apiCache = new Map();
+const _API_CACHE_TTL = {
+  'getAllDepartments': 5 * 60 * 1000,
+  'getDepartmentsPublic': 5 * 60 * 1000,
+  'getMenuPermissions': 5 * 60 * 1000,
+  'getCourseList': 3 * 60 * 1000,
+  'getStaffListPublic': 2 * 60 * 1000
+};
+
+// Invalidate cache on mutations
+function _invalidateApiCache(action) {
+  if (!action) return;
+  if (/^(add|update|delete|save|resign|cancel|import|create|set)/i.test(action)) {
+    if (action.includes('Staff') || action.includes('Department')) {
+      _apiCache.delete('getAllDepartments');
+      _apiCache.delete('getDepartmentsPublic');
+      _apiCache.delete('getStaffListPublic');
+    }
+    if (action.includes('Course')) {
+      _apiCache.delete('getCourseList');
+    }
+    if (action.includes('Menu') || action.includes('Role') || action.includes('User')) {
+      _apiCache.delete('getMenuPermissions');
+    }
+  }
+}
+
+// Concurrency Throttling Queue (Max 2 simultaneous requests)
+const _apiQueue = [];
+let _activeApiRequests = 0;
+const _MAX_CONCURRENT_REQUESTS = 2;
+
+function _dequeueApi() {
+  if (_activeApiRequests >= _MAX_CONCURRENT_REQUESTS || _apiQueue.length === 0) return;
+  const task = _apiQueue.shift();
+  _activeApiRequests++;
+  task.fn().finally(() => {
+    _activeApiRequests--;
+    _dequeueApi();
+  });
+}
+
+function _queuedApiCall(fn) {
+  return new Promise((resolve, reject) => {
+    _apiQueue.push({
+      fn: () => fn().then(resolve).catch(reject)
+    });
+    _dequeueApi();
+  });
+}
+
+function _apiOnce(action, params) {
   return new Promise((resolve, reject) => {
     const url = 'https://script.google.com/macros/s/AKfycbzVb68jA2o8DpzvuQ8cFbSkPr3PCzXWt0KxplKP2D--R8LG6g2QmtDWW2xLX2xngUSc/exec';
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, token: State.token, ...params })
+      body: JSON.stringify({ action, token: State.token, ...params }),
+      redirect: 'follow'
     })
     .then(response => {
       if (!response.ok) {
@@ -2993,7 +3057,7 @@ function api(action, params={}) {
       if (contentType.includes('text/html')) {
         return response.text().then(html => {
           console.error('Server returned HTML:', html.substring(0, 200));
-          throw new Error('เซิร์ฟเวอร์คืนค่า HTML แทน JSON — อาจเกิดจาก CORS หรือ URL ไม่ถูกต้อง');
+          throw new Error('เซิร์ฟเวอร์คืนค่า HTML แทน JSON — กำลังลองใหม่');
         });
       }
       return response.text();
@@ -3007,7 +3071,7 @@ function api(action, params={}) {
         res = JSON.parse(text);
       } catch(e) {
         console.error('JSON parse error:', text.substring(0, 200));
-        throw new Error('เซิร์ฟเวอร์คืนค่าที่ไม่ใช่ JSON (Unexpected token)');
+        throw new Error('เซิร์ฟเวอร์คืนค่าที่ไม่ใช่ JSON');
       }
       if (res && res.success) {
         resolve(res.data);
@@ -3018,6 +3082,65 @@ function api(action, params={}) {
     .catch(err => {
       reject(new Error((err && err.message) || 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์'));
     });
+  });
+}
+
+async function api(action, params={}, options={}) {
+  _invalidateApiCache(action);
+
+  // Check in-memory cache for read operations
+  const cacheKey = action + '_' + JSON.stringify(params || {});
+  const ttl = _API_CACHE_TTL[action] || 0;
+  if (ttl > 0 && !options.skipCache && (!params || Object.keys(params).length === 0)) {
+    const cached = _apiCache.get(cacheKey);
+    if (cached && (Date.now() - cached.time < ttl)) {
+      return cached.data;
+    }
+  }
+
+  const MAX_RETRIES = 3;
+  let lastErr;
+
+  return _queuedApiCall(async () => {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await _apiOnce(action, params);
+        if (ttl > 0) {
+          _apiCache.set(cacheKey, { time: Date.now(), data: result });
+        }
+        return result;
+      } catch (err) {
+        lastErr = err;
+        const msg = (err && err.message) || '';
+
+        const isAuthError = msg.includes('ไม่ได้เข้าสู่ระบบ') || msg.includes('Session หมดอายุ') || msg.includes('รหัสผ่านไม่ถูกต้อง');
+        const shouldRetry = attempt < MAX_RETRIES && !isAuthError && (
+          msg.includes('404') ||
+          msg.includes('503') ||
+          msg.includes('500') ||
+          msg.includes('502') ||
+          msg.includes('429') ||
+          msg.includes('HTML') ||
+          msg.includes('เชื่อมต่อ') ||
+          msg.includes('network') ||
+          msg.includes('Script') ||
+          msg.includes('Failed to fetch') ||
+          msg.includes('NetworkError') ||
+          msg.includes('Lock') ||
+          msg.includes('ว่างเปล่า')
+        );
+
+        if (!shouldRetry) {
+          throw err;
+        }
+
+        const baseDelay = [600, 1200, 2000][attempt] || 2000;
+        const jitter = Math.floor(Math.random() * 250);
+        console.warn(`[API Retry] '${action}' (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${msg}. Retrying in ${baseDelay + jitter}ms...`);
+        await new Promise(resolve => setTimeout(resolve, baseDelay + jitter));
+      }
+    }
+    throw lastErr;
   });
 }
 window.api = api;
@@ -3162,7 +3285,18 @@ window.navigate = doNavigateInternal;
       showToast('กรุณาเข้าสู่ระบบใหม่', 'error');
       handleLogout();
     } else {
-      container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${err.message}</p></div>`;
+      container.innerHTML = `
+        <div class="empty-state" style="padding: 3rem 1.5rem; text-align: center; background: white; border-radius: 12px; margin: 1.5rem 0; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+          <div style="width: 56px; height: 56px; background: #fef3c7; color: #d97706; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; margin: 0 auto 1rem;">
+            <i class="fas fa-exclamation-triangle"></i>
+          </div>
+          <h3 style="font-size: 1.15rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">เกิดข้อผิดพลาดในการโหลดข้อมูล</h3>
+          <p style="color: #6b7280; font-size: 0.95rem; max-width: 460px; margin: 0 auto 1.5rem; line-height: 1.5;">${err.message || 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้'}</p>
+          <button onclick="navigate('${page}')" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.65rem 1.5rem; border-radius: 8px; font-weight: 500;">
+            <i class="fas fa-redo"></i> ลองใหม่อีกครั้ง
+          </button>
+        </div>
+      `;
     }
   }
 }

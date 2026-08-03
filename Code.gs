@@ -2700,8 +2700,10 @@ function _cleanupTempSheets(ss) {
 }
 
 function _createSheetIfNotExists(ss, name, headers) {
-  _cleanupTempSheets(ss);
   let sheet = ss.getSheetByName(name);
+  if (sheet && sheet.getLastRow() > 0) {
+    return sheet;
+  }
   if (!sheet) sheet = ss.insertSheet(name);
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(headers);
@@ -2806,29 +2808,14 @@ function _getOrCreateSubfolder(parent, name) {
 
 // ── Getters (used by other services) ─────────────────────────
 
+let _cachedSpreadsheet = null;
 function getSpreadsheet() {
+  if (_cachedSpreadsheet) return _cachedSpreadsheet;
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty(CONFIG.PROP_SS_ID);
   if (!id) throw new Error('ระบบยังไม่ได้ติดตั้ง กรุณารัน setup ก่อน');
-  const ss = SpreadsheetApp.openById(id);
-
-  // Migration: Ensure 'หัวหน้า_ID' column exists in 'พนักงาน' sheet
-  try {
-    const sheet = ss.getSheetByName(SHEETS.STAFF);
-    if (sheet) {
-      const lastCol = sheet.getLastColumn();
-      if (lastCol > 0) {
-        const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-        if (headers.indexOf('หัวหน้า_ID') === -1) {
-          sheet.getRange(1, lastCol + 1).setValue('หัวหน้า_ID');
-        }
-      }
-    }
-  } catch (e) {
-    Logger.log('Migration error (หัวหน้า_ID): ' + e);
-  }
-
-  return ss;
+  _cachedSpreadsheet = SpreadsheetApp.openById(id);
+  return _cachedSpreadsheet;
 }
 
 function getRootFolder() {

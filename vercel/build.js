@@ -20,34 +20,49 @@ const gasUrl = 'https://script.google.com/macros/s/AKfycbzVb68jA2o8DpzvuQ8cFbSkP
 const now = new Date();
 const versionStr = `${now.getFullYear()+543}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}.${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
-// Find the api function block - support both old single-function and new _apiOnce+api pattern
-let oldBlock = '';
-let startIdx = -1;
-let endIdx = -1;
+// Find the _apiOnce function block and replace with fetch version
+const oldPatternStart = 'function _apiOnce(action, params) {';
+const oldPatternEnd = '  });\r\n}';
+const oldPatternEndLF = '  });\n}';
 
-// Try new pattern first (_apiOnce + api)
-const newPatternStart = 'function _apiOnce(action, params) {';
-const newPatternStartAlt = 'function api(action, params={}) {';
-const blockEnd = 'window.api = api;';
-
-startIdx = result.indexOf(newPatternStart);
-if (startIdx === -1) startIdx = result.indexOf(newPatternStartAlt);
-endIdx = result.indexOf(blockEnd, startIdx);
-
-if (startIdx === -1 || endIdx === -1) {
-  console.error('Could not find api function block!');
+let startIdx = result.indexOf(oldPatternStart);
+if (startIdx === -1) {
+  console.error('Could not find _apiOnce function block in merged output!');
   process.exit(1);
 }
 
-oldBlock = result.substring(startIdx, endIdx + blockEnd.length);
+let endIdx = result.indexOf(oldPatternEnd, startIdx);
+let endLen = oldPatternEnd.length;
+if (endIdx === -1) {
+  endIdx = result.indexOf(oldPatternEndLF, startIdx);
+  endLen = oldPatternEndLF.length;
+}
 
-const newApi = `function api(action, params={}) {
+if (endIdx === -1) {
+  // Fallback: search for handleApiCall ending
+  const fallbackEnd = '.handleApiCall(action, { token: State.token, ...params });\r\n  });\r\n}';
+  const fallbackEndLF = '.handleApiCall(action, { token: State.token, ...params });\n  });\n}';
+  endIdx = result.indexOf(fallbackEnd, startIdx);
+  endLen = fallbackEnd.length;
+  if (endIdx === -1) {
+    endIdx = result.indexOf(fallbackEndLF, startIdx);
+    endLen = fallbackEndLF.length;
+  }
+}
+
+if (endIdx === -1) {
+  console.error('Could not find _apiOnce function end!');
+  process.exit(1);
+}
+
+const newApiOnce = `function _apiOnce(action, params) {
   return new Promise((resolve, reject) => {
     const url = '${gasUrl}';
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, token: State.token, ...params })
+      body: JSON.stringify({ action, token: State.token, ...params }),
+      redirect: 'follow'
     })
     .then(response => {
       if (!response.ok) {
@@ -57,7 +72,7 @@ const newApi = `function api(action, params={}) {
       if (contentType.includes('text/html')) {
         return response.text().then(html => {
           console.error('Server returned HTML:', html.substring(0, 200));
-          throw new Error('เซิร์ฟเวอร์คืนค่า HTML แทน JSON — อาจเกิดจาก CORS หรือ URL ไม่ถูกต้อง');
+          throw new Error('เซิร์ฟเวอร์คืนค่า HTML แทน JSON — กำลังลองใหม่');
         });
       }
       return response.text();
@@ -71,7 +86,7 @@ const newApi = `function api(action, params={}) {
         res = JSON.parse(text);
       } catch(e) {
         console.error('JSON parse error:', text.substring(0, 200));
-        throw new Error('เซิร์ฟเวอร์คืนค่าที่ไม่ใช่ JSON (Unexpected token)');
+        throw new Error('เซิร์ฟเวอร์คืนค่าที่ไม่ใช่ JSON');
       }
       if (res && res.success) {
         resolve(res.data);
@@ -83,10 +98,9 @@ const newApi = `function api(action, params={}) {
       reject(new Error((err && err.message) || 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์'));
     });
   });
-}
-window.api = api;`;
+}`;
 
-result = result.substring(0, startIdx) + newApi + result.substring(endIdx + blockEnd.length);
+result = result.substring(0, startIdx) + newApiOnce + result.substring(endIdx + endLen);
 
 // Replace version string
 result = result.replace(/Nursing Service Organization v[\d.]+/g, 'Nursing Service Organization v' + versionStr);
