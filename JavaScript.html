@@ -1047,7 +1047,7 @@ async function renderStaffList(filters) {
               <tr>
                 <td>${i+1}</td>
                 <td>${s.photoId
-                  ? `<img src="https://drive.google.com/thumbnail?id=${s.photoId}&sz=w80" class="staff-photo" onerror="this.outerHTML=photoPlaceholder('${s.name}')">`
+                  ? `<img src="https://drive.google.com/thumbnail?id=${s.photoId}&sz=w80" class="staff-photo" data-name="${(s.name||'').replace(/"/g,'&quot;')}" onerror="this.outerHTML=window.photoPlaceholder(this.dataset.name)">`
                   : photoPlaceholder(s.name)
                 }</td>
                 <td>
@@ -1099,6 +1099,7 @@ function photoPlaceholder(name) {
   const ch = name ? cleanPrefix(name).charAt(0) : '?';
   return `<div class="staff-photo-placeholder">${ch}</div>`;
 }
+window.photoPlaceholder = photoPlaceholder;
 
 function empTypeBadge(type) {
   if (!type) return 'gray';
@@ -1318,7 +1319,7 @@ async function viewProfile(id) {
     let photoHtml = '';
     if (d.photoId) {
       const init = cleanPrefix(d.name).charAt(0);
-      photoHtml = '<img src="https://drive.google.com/thumbnail?id=' + d.photoId + '&sz=w300" class="profile-photo-large" id="profilePhoto" onerror="this.outerHTML=\'<div class=profile-photo-large>' + init + '</div>\'">';
+      photoHtml = '<img src="https://drive.google.com/thumbnail?id=' + d.photoId + '&sz=w300" class="profile-photo-large" id="profilePhoto" data-init="' + init + '" onerror="this.outerHTML=\'<div class=profile-photo-large>\'+this.dataset.init+\'</div>\'">';
     } else {
       const init = cleanPrefix(d.name).charAt(0);
       photoHtml = '<div class="profile-photo-large">' + init + '</div>';
