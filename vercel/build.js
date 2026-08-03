@@ -16,7 +16,7 @@ result = result.replace("<?!= include('Styles'); ?>", styles.trim());
 result = result.replace("<?!= include('JavaScript'); ?>", javascript.trim());
 result = result.replace("<?!= include('CompetenciesJS'); ?>", competencies.trim());
 
-const gasUrl = 'https://script.google.com/macros/s/AKfycbzVb68jA2o8DpzvuQ8cFbSkPr3PCzXWt0KxplKP2D--R8LG6g2QmtDWW2xLX2xngUSc/exec';
+const firebaseUrl = 'https://us-central1-hr-nongsila.cloudfunctions.net/api';
 const now = new Date();
 const versionStr = `${now.getFullYear()+543}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}.${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
@@ -71,7 +71,7 @@ if (endIdx === -1) {
 
 const newApiOnce = `function _apiOnce(action, params) {
   return new Promise((resolve, reject) => {
-    const url = '${gasUrl}';
+    const url = '${firebaseUrl}';
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
