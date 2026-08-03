@@ -357,26 +357,53 @@ AuthService.logout = function (token) {
   return { ok: true };
 };
 
+// Execution-level session cache: avoid repeated PropertiesService reads in same GAS invocation
+const _sessionCache = {};
+
 AuthService.validateToken = function (token) {
   if (!token) throw new Error('ไม่ได้เข้าสู่ระบบ');
 
-  // DEV_MODE: ตรวจสอบ session ตามปกติ แต่ถ้าไม่พบให้ return admin
+  // Return cached session within same execution (avoids repeated PropertiesService reads)
+  if (_sessionCache[token]) return _sessionCache[token];
+
   const props = PropertiesService.getScriptProperties();
   const raw   = props.getProperty('SESSION_' + token);
 
   if (DEV_MODE && !raw) {
-    // คืนค่า admin session สำหรับ dev mode
-    return { userId: 1, username: 'admin', role: 'admin', name: 'ผู้ดูแลระบบ' };
+    const devSession = { userId: 1, username: 'admin', role: 'admin', name: 'ผู้ดูแลระบบ' };
+    _sessionCache[token] = devSession;
+    return devSession;
   }
 
   if (!raw) throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
   const session = JSON.parse(raw);
+
   if (!DEV_MODE && Date.now() > session.expiry) {
     props.deleteProperty('SESSION_' + token);
     throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
   }
-  session.expiry = Date.now() + SESSION_TTL_MS;
-  props.setProperty('SESSION_' + token, JSON.stringify(session));
+
+  // Lazy renewal: only write back if session expires in less than 30 minutes
+  // This prevents PropertiesService write on every single API call (the main cause of 404/lock errors)
+  const RENEW_THRESHOLD_MS = 30 * 60 * 1000;
+  if (!DEV_MODE && (session.expiry - Date.now()) < RENEW_THRESHOLD_MS) {
+    try {
+      const lock = LockService.getScriptLock();
+      if (lock.tryLock(500)) {
+        try {
+          session.expiry = Date.now() + SESSION_TTL_MS;
+          props.setProperty('SESSION_' + token, JSON.stringify(session));
+        } finally {
+          lock.releaseLock();
+        }
+      }
+    } catch(e) {
+      // Non-critical: if lock fails, session continues unchanged
+      Logger.log('Session renewal lock failed: ' + e);
+    }
+  }
+
+  _sessionCache[token] = session;
   return session;
 };
 
