@@ -333,13 +333,25 @@ window.api = api;
   window.renderUsers = renderUsers;
   window.renderImport = renderImport;
 
-async function loadAndApplyMenuPermissions() {
+async function loadAndApplyMenuPermissions(retryCount = 0) {
   try {
+    // Small delay on first load to avoid competing with dashboard/other init requests
+    if (retryCount === 0) await new Promise(r => setTimeout(r, 300));
     const permissions = await api('getMenuPermissions');
     State.menuPermissions = permissions;
     applyMenuPermissions(permissions);
   } catch(e) {
-    console.error('Failed to load menu permissions:', e);
+    console.error('Failed to load menu permissions (attempt ' + (retryCount+1) + '):', e);
+    // Use cached permissions if available
+    if (State.menuPermissions && State.menuPermissions.length) {
+      applyMenuPermissions(State.menuPermissions);
+      return;
+    }
+    // Retry up to 5 times with increasing delay
+    if (retryCount < 5) {
+      const delay = [1000, 2000, 3000, 5000, 8000][retryCount] || 8000;
+      setTimeout(() => loadAndApplyMenuPermissions(retryCount + 1), delay);
+    }
   }
 }
 

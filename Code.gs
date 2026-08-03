@@ -593,6 +593,13 @@ const DEFAULT_MENU_PERMISSIONS = [
 
 AuthService.getMenuPermissions = function (token) {
   AuthService.validateToken(token);
+
+  // Check CacheService first — menu permissions rarely change
+  try {
+    const cached = CacheService.getScriptCache().get('MENU_PERMS');
+    if (cached) return JSON.parse(cached);
+  } catch(e) {}
+
   const ss = getSpreadsheet();
   let sheet = ss.getSheetByName(SHEETS.MENU_PERMISSIONS || 'สิทธิ์เมนู');
 
@@ -607,17 +614,19 @@ AuthService.getMenuPermissions = function (token) {
     ]);
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
     SpreadsheetApp.flush();
+    try { CacheService.getScriptCache().put('MENU_PERMS', JSON.stringify(DEFAULT_MENU_PERMISSIONS), 300); } catch(e) {}
     return DEFAULT_MENU_PERMISSIONS;
   }
 
   let objects = sheetToObjects(sheet);
   if (!objects || !objects.length) {
+    try { CacheService.getScriptCache().put('MENU_PERMS', JSON.stringify(DEFAULT_MENU_PERMISSIONS), 300); } catch(e) {}
     return DEFAULT_MENU_PERMISSIONS;
   }
 
   const validMenuIds = DEFAULT_MENU_PERMISSIONS.map(m => m.menuId);
 
-  return objects
+  const result = objects
     .map(o => {
       if (String(o['MenuID'] || '') === 'training') o['MenuID'] = 'competencies';
       return o;
@@ -632,6 +641,10 @@ AuthService.getMenuPermissions = function (token) {
       medium:   String(o['Medium']).toLowerCase() === 'true'|| o['Medium'] === true,
       low:      String(o['Low']).toLowerCase() === 'true'   || o['Low'] === true,
     }));
+
+  // Cache for 5 minutes — permissions don't change often
+  try { CacheService.getScriptCache().put('MENU_PERMS', JSON.stringify(result), 300); } catch(e) {}
+  return result;
 };
 
 AuthService.updateMenuPermissions = function (token, menuList) {
@@ -655,6 +668,8 @@ AuthService.updateMenuPermissions = function (token, menuList) {
   ]);
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   SpreadsheetApp.flush();
+  // Invalidate menu permissions cache so next call gets fresh data
+  try { CacheService.getScriptCache().remove('MENU_PERMS'); } catch(e) {}
   return { message: 'บันทึกสิทธิ์การเข้าถึงเมนูลง Google Sheet เรียบร้อยแล้ว' };
 };
 
