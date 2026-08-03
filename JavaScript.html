@@ -195,7 +195,7 @@ window.closeModal = closeModal;
   window.doNavigate = doNavigateInternal;
 window.navigate = doNavigateInternal;
 
-function api(action, params={}) {
+function _apiOnce(action, params) {
   return new Promise((resolve, reject) => {
     google.script.run
       .withSuccessHandler(res => {
@@ -210,6 +210,30 @@ function api(action, params={}) {
       })
       .handleApiCall(action, { token: State.token, ...params });
   });
+}
+
+async function api(action, params={}) {
+  const MAX_RETRY = 2;
+  let lastErr;
+  for (let i = 0; i <= MAX_RETRY; i++) {
+    try {
+      return await _apiOnce(action, params);
+    } catch(err) {
+      lastErr = err;
+      const msg = (err && err.message) || '';
+      // retry เฉพาะ error ที่เกิดจาก GAS infrastructure (404, network)
+      const shouldRetry = i < MAX_RETRY && (
+        msg.includes('404') ||
+        msg.includes('503') ||
+        msg.includes('เชื่อมต่อ') ||
+        msg.includes('network') ||
+        msg.includes('Script')
+      );
+      if (!shouldRetry) throw err;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1))); // 1s, 2s
+    }
+  }
+  throw lastErr;
 }
 window.api = api;
 
@@ -925,7 +949,7 @@ async function renderStaffList(filters) {
               <tr>
                 <td>${i+1}</td>
                 <td>${s.photoId
-                  ? `<img src="https:\/\/drive.google.com/uc?export=view&id=${s.photoId}" class="staff-photo" onerror="this.outerHTML=photoPlaceholder('${s.name}')">`
+                  ? `<img src="https://drive.google.com/thumbnail?id=${s.photoId}&sz=w80" class="staff-photo" onerror="this.outerHTML=photoPlaceholder('${s.name}')">`
                   : photoPlaceholder(s.name)
                 }</td>
                 <td>
@@ -1196,7 +1220,7 @@ async function viewProfile(id) {
     let photoHtml = '';
     if (d.photoId) {
       const init = cleanPrefix(d.name).charAt(0);
-      photoHtml = '<img src="https:\/\/drive.google.com/uc?export=view&id=' + d.photoId + '" class="profile-photo-large" id="profilePhoto">';
+      photoHtml = '<img src="https://drive.google.com/thumbnail?id=' + d.photoId + '&sz=w300" class="profile-photo-large" id="profilePhoto" onerror="this.outerHTML=\'<div class=profile-photo-large>' + init + '</div>\'">';
     } else {
       const init = cleanPrefix(d.name).charAt(0);
       photoHtml = '<div class="profile-photo-large">' + init + '</div>';
@@ -1440,8 +1464,16 @@ async function uploadPhoto(e, staffId) {
     const base64 = await fileToBase64(file);
     const res = await api('uploadPhoto', { staffId, base64, mimeType: file.type, fileName: file.name });
     showToast('อัปโหลดรูปสำเร็จ', 'success');
-    // Refresh profile
-    viewProfile(staffId);
+    // อัปเดตรูปทันทีโดยไม่ต้อง reload ทั้งหน้า
+    if (res && res.fileId) {
+      const thumbUrl = 'https://drive.google.com/thumbnail?id=' + res.fileId + '&sz=w300';
+      const photoWrap = document.getElementById('profilePhotoWrap');
+      if (photoWrap) {
+        photoWrap.innerHTML = '<img src="' + thumbUrl + '" class="profile-photo-large" id="profilePhoto" onerror="this.style.display=\'none\'">';
+      }
+    } else {
+      viewProfile(staffId);
+    }
   } catch(err) { showToast(err.message, 'error') }
 }
 

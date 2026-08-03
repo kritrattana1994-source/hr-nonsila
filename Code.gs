@@ -158,31 +158,21 @@ function handleApiCall(action, params) {
       case 'addTraining':        return ok(DataService.addTraining(t, params.data));
       case 'updateTraining':     return ok(DataService.updateTraining(t, params.id, params.data));
       case 'deleteTraining':     return ok(DataService.deleteTraining(t, params.id));
-        // ── Courses ──
-        // ── Competencies ──
-                case 'cleanupExtraSheets':  return ok(_cleanupTempSheets(getSpreadsheet()));
-        case 'getCompetencies':     return ok(DataService.getCompetencies(t));
-        case 'saveCompetency':      return ok(DataService.saveCompetency(t, params.data));
-        case 'deleteCompetency':    return ok(DataService.deleteCompetency(t, params.id));
-        case 'getEvaluations':      return ok(DataService.getEvaluations(t, params.filters));
-        case 'saveEvaluation':      return ok(DataService.saveEvaluation(t, params.data));
-          case 'saveEvaluationsBulk': return ok(DataService.saveEvaluationsBulk(t, params.dataList));
 
-        // ── Courses ──
-        // ── Courses ──
+      // ── Competencies ──
+      case 'cleanupExtraSheets':  return ok(_cleanupTempSheets(getSpreadsheet()));
+      case 'getCompetencies':     return ok(DataService.getCompetencies(t));
+      case 'saveCompetency':      return ok(DataService.saveCompetency(t, params.data));
+      case 'deleteCompetency':    return ok(DataService.deleteCompetency(t, params.id));
+      case 'getEvaluations':      return ok(DataService.getEvaluations(t, params.filters));
+      case 'saveEvaluation':      return ok(DataService.saveEvaluation(t, params.data));
+      case 'saveEvaluationsBulk': return ok(DataService.saveEvaluationsBulk(t, params.dataList));
+
+      // ── Courses ──
       case 'getCourseList':      return ok(DataService.getCourseList(t));
       case 'addCourse':          return ok(DataService.addCourse(t, params.data));
       case 'updateCourse':       return ok(DataService.updateCourse(t, params.id, params.data));
       case 'deleteCourse':       return ok(DataService.deleteCourse(t, params.id));
-
-        // ── Competencies ──
-                case 'cleanupExtraSheets':  return ok(_cleanupTempSheets(getSpreadsheet()));
-        case 'getCompetencies':     return ok(DataService.getCompetencies(t));
-        case 'saveCompetency':      return ok(DataService.saveCompetency(t, params.data));
-        case 'deleteCompetency':    return ok(DataService.deleteCompetency(t, params.id));
-        case 'getEvaluations':      return ok(DataService.getEvaluations(t, params.filters));
-        case 'saveEvaluation':      return ok(DataService.saveEvaluation(t, params.data));
-          case 'saveEvaluationsBulk': return ok(DataService.saveEvaluationsBulk(t, params.dataList));
 
       // ── Documents ──
       case 'getDocuments':       return ok(DataService.getDocuments(t, params.staffId));
@@ -338,7 +328,8 @@ AuthService.login = function (username, password) {
     name: targetUser['ชื่อ-สกุล'] || (matchedStaff ? matchedStaff['ชื่อ-สกุล'] : 'ผู้ใช้งาน'),
     dept: matchedStaff ? String(matchedStaff['หน่วยงาน'] || '').trim() : '',
     staffId: matchedStaff ? matchedStaff.ID : null,
-    createdAt: new Date().getTime()
+    createdAt: new Date().getTime(),
+    expiry: new Date().getTime() + SESSION_TTL_MS
   };
 
   try {
